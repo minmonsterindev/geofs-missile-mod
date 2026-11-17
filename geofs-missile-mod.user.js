@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.14.0
+// @version      1.15.0
 // @updated      2026-11-17
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.14.0';
+    const VERSION = '1.15.0';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -43,7 +43,8 @@
             reload: 'd',
             calibrate: 'shift+d',
             bonus: 'k',
-            bonusCal: 'shift+k'
+            bonusCal: 'shift+k',
+            panel: 'u'
         },
 
         // Vol du missile : les performances propres à chaque missile sont dans
@@ -188,6 +189,7 @@
         hudAt: 0,
         cal: {},
         calMode: false,
+        panelOpen: false,
         markers: [],         // repères visuels affichés en calibrage
         ui: null
     };
@@ -529,7 +531,22 @@
             'display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none}',
             '.gmm-toast{padding:6px 14px;border:1px solid;border-radius:5px;background:rgba(0,0,0,.62);',
             'font:12px ui-monospace,Consolas,monospace;transition:opacity .45s,transform .45s}',
-            '.gmm-toast.out{opacity:0;transform:translateY(-8px)}'
+            '.gmm-toast.out{opacity:0;transform:translateY(-8px)}',
+            '.gmm-panel{position:fixed;left:12px;bottom:98px;z-index:9998;display:none;width:308px;',
+            'background:rgba(4,14,8,.92);border:1px solid rgba(57,255,136,.35);border-radius:8px;',
+            'padding:10px 12px;color:#9fffc4;font:12px/1.5 ui-monospace,Consolas,monospace;',
+            'box-shadow:0 6px 26px rgba(0,0,0,.55)}',
+            '.gmm-panel.open{display:block}',
+            '.gmm-panel h4{margin:0 0 6px;color:#eafff2;font-size:12px;letter-spacing:.6px;font-weight:600}',
+            '.gmm-panel .row{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:2px 0}',
+            '.gmm-panel .sep{border-top:1px solid rgba(57,255,136,.18);margin:8px 0;padding-top:7px}',
+            '.gmm-panel .v{color:#eafff2}',
+            '.gmm-panel .dim{color:#5c8f72}',
+            '.gmm-panel .armed{color:#ff5252;text-shadow:0 0 8px rgba(255,82,82,.6)}',
+            '.gmm-btn{background:rgba(57,255,136,.1);border:1px solid rgba(57,255,136,.45);color:#9fffc4;',
+            'border-radius:4px;padding:3px 9px;font:11px ui-monospace,Consolas,monospace;cursor:pointer}',
+            '.gmm-btn:hover{background:rgba(57,255,136,.24)}',
+            '.gmm-btn.small{padding:1px 7px;min-width:22px}'
         ].join('');
         document.head.appendChild(style);
 
@@ -546,7 +563,28 @@
         toasts.className = 'gmm-toasts';
         document.body.appendChild(toasts);
 
-        S.ui = { hud, reticle, toasts, reticleLabel: reticle.querySelector('span') };
+        // Interface dédiée, ouverte par le bouton de la barre GeoFS (ou U).
+        const panel = document.createElement('div');
+        panel.className = 'gmm-panel';
+        panel.addEventListener('click', ev => {
+            const b = ev.target && ev.target.closest ? ev.target.closest('button[data-act]') : null;
+            if (!b) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            const act = b.getAttribute('data-act');
+            if (act === 'bonus') toggleBonus();
+            else if (act === 'reset') bonusReset();
+            else if (act === 'lat+') bonusAdjust(0, 5);
+            else if (act === 'lat-') bonusAdjust(0, -5);
+            else if (act === 'fwd+') bonusAdjust(1, 5);
+            else if (act === 'fwd-') bonusAdjust(1, -5);
+            else if (act === 'up+') bonusAdjust(2, 2);
+            else if (act === 'up-') bonusAdjust(2, -2);
+            renderPanel();
+        });
+        document.body.appendChild(panel);
+
+        S.ui = { hud, reticle, toasts, reticleLabel: reticle.querySelector('span'), panel };
     }
 
     // 'shift+q' -> 'MAJ+Q' pour l'affichage ; un tableau est listé.
@@ -1590,8 +1628,10 @@
             '[' + keyLabel(CFG.keys.reload) + '] réarmer &nbsp; ' +
             '[' + keyLabel(CFG.keys.calibrate) + '] calibrage &nbsp; ' +
             '[' + keyLabel(CFG.keys.bonus) + '] LEGO &nbsp; ' +
-            '[' + keyLabel(CFG.keys.bonusCal) + '] régler l\'avion' +
+            '[' + keyLabel(CFG.keys.bonusCal) + '] régler l\'avion &nbsp; ' +
+            '[' + keyLabel(CFG.keys.panel) + '] panneau' +
             '</div>';
+        if (S.panelOpen) renderPanel();
     }
 
     /* =========================== BOUCLE DE JEU ========================= */
@@ -1665,9 +1705,10 @@
         url: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31-lego.glb',
         entity: null,
         on: false,
-        cal: false,            // mode réglage de la position (Maj+K)
-        offset: [0, 0, 0],     // [gauche, avant, haut] en mètres
-        store: 'gmm_bonus_offset_v1'
+        cal: false,               // mode réglage de la position (Maj+K)
+        home: [28, 0, 0],         // écart par défaut : 28 m sur la gauche
+        offset: [28, 0, 0],       // [gauche, avant, haut] en mètres
+        store: 'gmm_bonus_offset_v2'
     };
 
     function bonusLoad() {
@@ -1692,7 +1733,7 @@
     }
 
     function bonusReset() {
-        BONUS.offset = [0, 0, 0];
+        BONUS.offset = BONUS.home.slice();
         bonusSave();
         updateHUD();
         toast('Position de l\'avion bonus remise à zéro', '#8ef6ff');
@@ -1729,16 +1770,13 @@
         const Cesium = C();
         const v = viewer();
         if (!v || !Cesium) return;
-        const ac = geofs.aircraft.instance;
-        const mesh = ac && ac.object3d && ac.object3d.model;
 
         if (BONUS.on) {
             BONUS.on = false;
             BONUS.cal = false;
             if (BONUS.entity) { try { v.entities.remove(BONUS.entity); } catch (e) { } }
             BONUS.entity = null;
-            try { if (mesh) mesh.show = true; } catch (e) { }
-            toast('Modèle GeoFS restauré', '#39ff88');
+            toast('MiG-31 LEGO retiré', '#39ff88');
             return;
         }
 
@@ -1752,15 +1790,93 @@
                 orientation: new Cesium.CallbackProperty(bonusQuat, false),
                 model: { uri: BONUS.url, minimumPixelSize: 64, scale: 1.0 }
             });
-            try { if (mesh) mesh.show = false; } catch (e) { }
             BONUS.on = true;
-            toast('MiG-31 LEGO — ' + keyLabel(CFG.keys.bonus) + ' revenir · ' + keyLabel(CFG.keys.bonusCal) + ' régler la position', '#8ef6ff');
+            const o = BONUS.offset;
+            toast('MiG-31 LEGO — modèle à part, ' + o[0].toFixed(0) + ' m sur la gauche · ' +
+                keyLabel(CFG.keys.bonusCal) + ' régler · ' + keyLabel(CFG.keys.panel) + ' interface', '#8ef6ff');
         } catch (e) {
             warn('avion bonus', e);
-            try { if (mesh) mesh.show = true; } catch (err) { }
             BONUS.on = false;
             toast('Modèle bonus indisponible', '#ff5a3c');
         }
+    }
+
+    /* ===================== INTERFACE DÉDIÉE (PANNEAU) ================== */
+
+    // Bouton inséré dans la barre du bas de GeoFS, entre « Location » et
+    // « Camera » (les deux voisins directs dans .geofs-ui-bottom).
+    function installPanelButton() {
+        if (document.getElementById('gmm-panel-btn')) return true;
+        const cam = document.getElementById('geofs-camera-selector');
+        if (!cam || !cam.parentElement) return false;
+        const btn = document.createElement('button');
+        btn.id = 'gmm-panel-btn';
+        btn.className = 'mdl-button mdl-js-button geofs-f-standard-ui';
+        btn.textContent = 'Armement';
+        btn.title = 'Interface du mod missiles (' + keyLabel(CFG.keys.panel) + ')';
+        btn.addEventListener('click', ev => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            togglePanel();
+        });
+        cam.parentElement.insertBefore(btn, cam);
+        return true;
+    }
+
+    function togglePanel(force) {
+        if (!S.ui || !S.ui.panel) return;
+        const open = force === undefined ? !S.panelOpen : !!force;
+        S.panelOpen = open;
+        S.ui.panel.classList.toggle('open', open);
+        if (open) renderPanel();
+    }
+
+    function renderPanel() {
+        if (!S.ui || !S.ui.panel || !S.panelOpen) return;
+        const ac = geofs.aircraft.instance;
+        const name = S.profile ? S.profile.name : (aircraftName(ac) || 'inconnu');
+        const c = S.targetId ? findContact(S.targetId) : null;
+        const o = BONUS.offset;
+        const h = [];
+
+        h.push('<h4>◈ SYSTÈME D\'ARMEMENT <span class="dim">v' + VERSION + '</span></h4>');
+        h.push('<div class="row"><span>Avion</span><span class="v">' + name + '</span></div>');
+        h.push('<div class="row"><span>État</span><span class="' + (S.armed ? 'armed' : 'dim') + '">' +
+            (S.armed ? '● ARMÉ' : '○ SAFE') + '</span></div>');
+        h.push('<div class="row"><span>Cible</span><span class="v">' +
+            (c ? c.name + ' · ' + (c.dist / 1000).toFixed(1) + ' km' : 'aucune') + '</span></div>');
+        if (S.profile && S.profile.missiles) {
+            h.push('<div class="row"><span>Missiles</span><span class="v">' + S.loadout + ' / ' + S.profile.missiles + '</span></div>');
+            h.push('<div class="row"><span>Type</span><span class="v">' + currentType().name + '</span></div>');
+        }
+        if (S.profile && S.profile.bombs) {
+            h.push('<div class="row"><span>Bombes</span><span class="v">' + S.bombs + ' / ' + S.profile.bombs + '</span></div>');
+        }
+        h.push('<div class="row"><span>Contacts</span><span class="v">' + S.contacts.length + '</span></div>');
+
+        h.push('<div class="sep"></div>');
+        h.push('<h4>MIG-31 LEGO <span class="dim">modèle à part</span></h4>');
+        h.push('<div class="row"><span>Affichage</span><button class="gmm-btn" data-act="bonus">' +
+            (BONUS.on ? 'masquer' : 'afficher') + '</button>' +
+            '<span class="dim">[' + keyLabel(CFG.keys.bonus) + ']</span></div>');
+        [['Écart latéral', 0, 'lat', 5], ['Décalage avant', 1, 'fwd', 5], ['Hauteur', 2, 'up', 2]].forEach(a => {
+            h.push('<div class="row"><span>' + a[0] + '</span><span class="v">' +
+                (o[a[1]] > 0 ? '+' : '') + o[a[1]].toFixed(1) + ' m</span><span>' +
+                '<button class="gmm-btn small" data-act="' + a[2] + '-">−</button> ' +
+                '<button class="gmm-btn small" data-act="' + a[2] + '+">+</button></span></div>');
+        });
+        h.push('<div class="row"><span class="dim">' + a0Label() + '</span>' +
+            '<button class="gmm-btn" data-act="reset">Recentrer</button></div>');
+
+        h.push('<div class="sep"></div>');
+        h.push('<div class="dim">' + keyLabel(CFG.keys.arm) + ' armer · ' + keyLabel(CFG.keys.fire) + ' tirer · ' +
+            keyLabel(CFG.keys.type) + ' type · ' + keyLabel(CFG.keys.bomb) + ' bombe · ' +
+            keyLabel(CFG.keys.reload) + ' réarmer · ' + keyLabel(CFG.keys.panel) + ' ce panneau</div>');
+        S.ui.panel.innerHTML = h.join('');
+    }
+
+    function a0Label() {
+        return 'réglage fin : ' + keyLabel(CFG.keys.bonusCal);
     }
 
     /* ============================== TOUCHES ============================ */
@@ -1887,6 +2003,7 @@
             else if (matchAny(e, CFG.keys.target)) action = cycleTarget;
             else if (matchAny(e, CFG.keys.reload)) action = reload;
             else if (matchAny(e, CFG.keys.calibrate)) action = toggleCalibration;
+            else if (matchAny(e, CFG.keys.panel)) action = togglePanel;
             else if (matchAny(e, CFG.keys.bonusCal)) action = toggleBonusCal;
             else if (matchAny(e, CFG.keys.bonus)) action = toggleBonus;
             if (!action) return;
@@ -1906,6 +2023,12 @@
         bonusLoad();
         buildUI();
         installKeys();
+        // La barre du bas de GeoFS arrive parfois après le script : on réessaie.
+        let tries = 0;
+        const btnTimer = setInterval(() => {
+            if (installPanelButton() || ++tries > 120) clearInterval(btnTimer);
+        }, 500);
+        installPanelButton();
         S.lastFrame = performance.now();
         if (typeof geofs.api.addFrameCallback === 'function') {
             geofs.api.addFrameCallback(tick);

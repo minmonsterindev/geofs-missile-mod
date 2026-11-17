@@ -199,3 +199,13 @@ place (il vole et se pilote normalement) ; **K** à nouveau rend le modèle d'or
 **Réglage en jeu** : `Maj+K` active le mode réglage (`²` avance, `,` recule,
 `(` / `)` gauche-droite, `[` / `]` haut-bas, `Maj` = pas de 2 m, `Retour arrière`
 = remise à zéro). Les valeurs sont mémorisées dans le navigateur.
+
+## Interface dédiée
+
+Un bouton **Armement** est ajouté dans la barre du bas de GeoFS, entre
+« Location » et « Camera » (ou touche `U`). Il ouvre un panneau qui résume
+l'état de l'armement et commande le MiG-31 LEGO : afficher/masquer, écart
+latéral, décalage avant, hauteur, et recentrage.
+
+Le MiG-31 LEGO est un **modèle à part** : il vole à côté de votre avion
+(28 m sur la gauche par défaut) au lieu de se superposer à lui.
