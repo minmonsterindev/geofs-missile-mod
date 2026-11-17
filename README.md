@@ -39,5 +39,5 @@ descendent, `Retour arrière` remet à zéro. Un repère coloré s'affiche sur c
 - 6 types de missiles avec leurs performances propres, textures générées, bombes pour les
   bombardiers (B-2, B-52, B-1B, Tu-160, Tu-95, Concorde).
 
-Le détail technique est dans [`geofs-api-notes.md`](geofs-api-notes.md) et le mode d'emploi
-complet dans [`README.md`](README.md)... ce fichier-ci.
+Le détail technique (repère GeoFS, `modelMatrix`, glTF, mesures par appareil) est dans
+[`geofs-api-notes.md`](geofs-api-notes.md).
