@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.10.0
+// @version      1.11.0
 // @updated      2026-11-17
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.10.0';
+    const VERSION = '1.11.0';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -96,32 +96,47 @@
 
     // Types de missiles sélectionnables avec '*' avant l'armement.
     // body / nose / band = couleurs de la texture générée.
+    // Géométrie : chaque type a ses vraies dimensions (m). caliber = diamètre
+    // du corps, length = longueur totale, noseLen = ogive, finSpan / finChord =
+    // ailettes arrière, canards = nombre d'ailerons avant (0 = aucun).
     const MISSILE_TYPES = [
         {
             name: 'AIM-120 AMRAAM', body: '#e9e9e9', nose: '#9aa0a6', band: '#4a6fa5',
-            maxSpeed: 900, accel: 190, turnRate: 1.6, range: 40000, life: 45, proximity: 22
+            maxSpeed: 900, accel: 190, turnRate: 1.6, range: 40000, life: 45, proximity: 22,
+            caliber: 0.178, length: 3.66, noseLen: 0.62, finSpan: 0.46, finChord: 0.40, canards: 0
         },
         {
             name: 'AIM-9X Sidewinder', body: '#f2f2f2', nose: '#8b5a3c', band: '#b04a2f',
-            maxSpeed: 760, accel: 260, turnRate: 2.8, range: 15000, life: 30, proximity: 18
+            maxSpeed: 760, accel: 260, turnRate: 2.8, range: 15000, life: 30, proximity: 18,
+            caliber: 0.127, length: 3.02, noseLen: 0.40, finSpan: 0.36, finChord: 0.30, canards: 4
         },
         {
             name: 'R-77 Adder', body: '#dde4d8', nose: '#6b7f5e', band: '#3f6b3a',
-            maxSpeed: 860, accel: 210, turnRate: 2.0, range: 30000, life: 40, proximity: 20
+            maxSpeed: 860, accel: 210, turnRate: 2.0, range: 30000, life: 40, proximity: 20,
+            caliber: 0.200, length: 3.60, noseLen: 0.55, finSpan: 0.52, finChord: 0.34, canards: 0
         },
         {
             name: 'R-73 Archer', body: '#e6e2d6', nose: '#7a6a4a', band: '#8a5a24',
-            maxSpeed: 720, accel: 280, turnRate: 3.0, range: 12000, life: 26, proximity: 16
+            maxSpeed: 720, accel: 280, turnRate: 3.0, range: 12000, life: 26, proximity: 16,
+            caliber: 0.170, length: 2.90, noseLen: 0.44, finSpan: 0.44, finChord: 0.28, canards: 4
         },
         {
             name: 'MBDA Meteor', body: '#dfe6ee', nose: '#7d8fa6', band: '#2f5f8a',
-            maxSpeed: 1000, accel: 170, turnRate: 1.5, range: 60000, life: 55, proximity: 24
+            maxSpeed: 1000, accel: 170, turnRate: 1.5, range: 60000, life: 55, proximity: 24,
+            caliber: 0.178, length: 3.65, noseLen: 0.58, finSpan: 0.46, finChord: 0.42, canards: 4
         },
         {
             name: 'AIM-54 Phoenix', body: '#e4e0d4', nose: '#8a7a5a', band: '#5c4a2a',
-            maxSpeed: 950, accel: 150, turnRate: 1.1, range: 80000, life: 70, proximity: 28
+            maxSpeed: 950, accel: 150, turnRate: 1.1, range: 80000, life: 70, proximity: 28,
+            caliber: 0.380, length: 3.96, noseLen: 0.78, finSpan: 0.92, finChord: 0.56, canards: 4
         }
     ];
+
+    // Bombe lisse type Mk-82, assemblée avec les mêmes primitives.
+    const BOMB_TYPE = {
+        name: 'Mk-82', body: '#3f4a3f', nose: '#47543f', band: '#d9c433',
+        caliber: 0.273, length: 2.22, noseLen: 0.66, finSpan: 0.52, finChord: 0.44
+    };
 
     // Répartition de secours, un point tous les deux missiles (un par côté).
     // [écartement, position avant/arrière] en fractions de la demi-envergure et
@@ -679,9 +694,19 @@
         return g;
     }
 
-    // Pas de cache ni de repère mémorisé : playerFrame() est appelé directement
-    // dans les CallbackProperty, donc recalculé à chaque évaluation par Cesium,
-    // avec la position et l'orientation du moment. Aucun retard d'une image.
+    // Le repère est recalculé à chaque image de rendu — jamais réutilisé d'une
+    // image sur l'autre, donc rien ne peut retarder — puis partagé par toutes
+    // les pièces de cette image : une munition compte une dizaine d'entités et
+    // on ne refait pas dix fois la même matrice.
+    const frameCache = { n: -1, fr: null };
+    function currentFrame() {
+        const v = window.geofs && geofs.api && geofs.api.viewer;
+        const n = (v && v.scene && v.scene.frameState) ? v.scene.frameState.frameNumber : -1;
+        if (n >= 0 && n === frameCache.n) return frameCache.fr;
+        const fr = playerFrame();
+        if (n >= 0) { frameCache.n = n; frameCache.fr = fr; }
+        return fr;
+    }
 
     function currentType() {
         return MISSILE_TYPES[S.typeIndex % MISSILE_TYPES.length] || MISSILE_TYPES[0];
@@ -692,8 +717,8 @@
         return (S.profile && S.profile.missiles) ? currentType().range : CFG.lockRange;
     }
 
-    function stationPos(st) {
-        const fr = playerFrame();
+    function stationPos(st, frame) {
+        const fr = frame || currentFrame();
         if (!fr) return null;
         const cal = calFor();
         return offsetPos(fr, st.x * cal.span, st.y + cal.f, st.z + cal.u);
@@ -742,8 +767,7 @@
         const v = viewer();
         const all = S.stations.concat(S.bombStations);
         all.forEach(st => {
-            try { v.entities.remove(st.body); } catch (e) { }
-            try { if (st.nose) v.entities.remove(st.nose); } catch (e) { }
+            (st.parts || []).forEach(e => { try { v.entities.remove(e); } catch (err) { } });
         });
         S.stations = [];
         S.bombStations = [];
@@ -811,52 +835,161 @@
         return Cesium.Color.fromCssColorString(base);
     }
 
-    function makeHardpoint(st, kind) {
+    /* =========================== MODÈLES 3D ============================ */
+    // Une munition = plusieurs primitives Cesium alignées sur un même axe :
+    // corps, ogive, ceinture, culot, tuyère, ailettes. Repère local : z le long
+    // de l'arme, x vers l'ailette de roulis demandée. Tout est paramétrique,
+    // aucun fichier 3D à télécharger.
+
+    // Orientation d'une pièce : z sur l'axe de l'arme, x vers le rayon choisi.
+    function modelQuat(getDir, deg) {
         const Cesium = C();
-        const v = viewer();
-        const missile = kind === 'missile';
-        const t = currentType();
-
-        st.body = v.entities.add({
-            position: new Cesium.CallbackProperty(() => stationPos(st) || Cesium.Cartesian3.fromDegrees(0, 0, 0), false),
-            orientation: new Cesium.CallbackProperty(() => {
-                const fr = playerFrame();
-                return fr ? quatFromZ(fr.F) : Cesium.Quaternion.IDENTITY;
-            }, false),
-            cylinder: {
-                length: missile ? 2.6 : 1.6,
-                topRadius: missile ? 0.10 : 0.20,
-                bottomRadius: missile ? 0.10 : 0.20,
-                material: missile
-                    ? surfaceMaterial(t.body, t.band, 'missile')
-                    : surfaceMaterial('#3f4a3f', '#2b332b', 'bomb')
-            }
-        });
-
-        if (missile) {
-            st.nose = v.entities.add({
-                position: new Cesium.CallbackProperty(() => {
-                    const p = stationPos(st);
-                    const fr = playerFrame();
-                    if (!p || !fr) return Cesium.Cartesian3.fromDegrees(0, 0, 0);
-                    return along(p, fr.F, 1.6);
-                }, false),
-                orientation: new Cesium.CallbackProperty(() => {
-                    const fr = playerFrame();
-                    return fr ? quatFromZ(fr.F) : Cesium.Quaternion.IDENTITY;
-                }, false),
-                cylinder: { length: 0.6, topRadius: 0, bottomRadius: 0.10, material: surfaceMaterial(t.nose, t.band, 'nose') }
-            });
+        const F = getDir();
+        if (!F) return Cesium.Quaternion.IDENTITY;
+        const up = new Cesium.Cartesian3(0, 0, 1);
+        const R = Cesium.Cartesian3.cross(up, F, new Cesium.Cartesian3());
+        if (Cesium.Cartesian3.magnitude(R) < 1e-5) Cesium.Cartesian3.clone(new Cesium.Cartesian3(1, 0, 0), R);
+        Cesium.Cartesian3.normalize(R, R);
+        const U = Cesium.Cartesian3.normalize(Cesium.Cartesian3.cross(F, R, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+        const rad = (deg || 0) * Math.PI / 180;
+        const cr = Math.cos(rad), sr = Math.sin(rad);
+        const X = new Cesium.Cartesian3(R.x * cr + U.x * sr, R.y * cr + U.y * sr, R.z * cr + U.z * sr);
+        const Y = Cesium.Cartesian3.cross(F, X, new Cesium.Cartesian3());
+        try {
+            const m = Cesium.Matrix3.fromColumnMajorArray(
+                [X.x, X.y, X.z, Y.x, Y.y, Y.z, F.x, F.y, F.z],
+                new Cesium.Matrix3()
+            );
+            return Cesium.Quaternion.fromRotationMatrix(m, new Cesium.Quaternion());
+        } catch (e) {
+            return quatFromZ(F);
         }
     }
 
-    // Met à jour l'apparence des missiles déjà accrochés aux ailes.
-    function refreshStationMaterials() {
-        const t = currentType();
-        S.stations.forEach(st => {
-            try { st.body.cylinder.material = surfaceMaterial(t.body, t.band, 'missile'); } catch (e) { }
-            try { st.nose.cylinder.material = surfaceMaterial(t.nose, t.band, 'nose'); } catch (e) { }
+    // Assemble une munition. getPos() = centre du corps, getDir() = axe avant,
+    // tous deux réévalués par Cesium à chaque rendu (voir currentFrame).
+    function buildModel(getPos, getDir, t, isBomb) {
+        const Cesium = C();
+        const v = viewer();
+        const parts = [];
+        const r = (t.caliber || 0.18) / 2;
+        const L = t.length || 3.6;
+        const noseLen = t.noseLen || 0.6;
+        const tailLen = isBomb ? Math.min(0.55, L * 0.22) : Math.min(0.36, L * 0.10);
+        const bodyLen = Math.max(0.2, L - noseLen - tailLen);
+        const finSpan = t.finSpan || 0.36;
+        const finChord = t.finChord || 0.36;
+        const solid = css => Cesium.Color.fromCssColorString(css);
+
+        // Un point du modèle : dz le long de l'axe, dr en rayon, deg en roulis.
+        function pointAt(dz, dr, deg) {
+            const p = getPos();
+            const F = getDir();
+            if (!p || !F) return Cesium.Cartesian3.fromDegrees(0, 0, 0);
+            const up = new Cesium.Cartesian3(0, 0, 1);
+            const R = Cesium.Cartesian3.cross(up, F, new Cesium.Cartesian3());
+            if (Cesium.Cartesian3.magnitude(R) < 1e-5) Cesium.Cartesian3.clone(new Cesium.Cartesian3(1, 0, 0), R);
+            Cesium.Cartesian3.normalize(R, R);
+            const U = Cesium.Cartesian3.normalize(Cesium.Cartesian3.cross(F, R, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+            const rad = (deg || 0) * Math.PI / 180;
+            const cr = Math.cos(rad), sr = Math.sin(rad);
+            return new Cesium.Cartesian3(
+                p.x + F.x * dz + (R.x * cr + U.x * sr) * dr,
+                p.y + F.y * dz + (R.y * cr + U.y * sr) * dr,
+                p.z + F.z * dz + (R.z * cr + U.z * sr) * dr
+            );
+        }
+
+        function add(dz, dr, deg, geom) {
+            try {
+                const desc = {
+                    position: new Cesium.CallbackProperty(() => pointAt(dz, dr, deg), false),
+                    orientation: new Cesium.CallbackProperty(() => modelQuat(getDir, deg), false)
+                };
+                Object.keys(geom).forEach(k => { desc[k] = geom[k]; });
+                parts.push(v.entities.add(desc));
+            } catch (e) { }
+        }
+
+        // corps
+        add((tailLen - noseLen) / 2, 0, 0, {
+            cylinder: {
+                length: bodyLen, topRadius: r, bottomRadius: r,
+                material: surfaceMaterial(t.body, t.band, isBomb ? 'bomb' : 'missile')
+            }
         });
+
+        // ogive (plus arrondie sur une bombe)
+        add(L / 2 - noseLen / 2, 0, 0, {
+            cylinder: {
+                length: noseLen,
+                topRadius: isBomb ? r * 0.22 : r * 0.10,
+                bottomRadius: r,
+                material: surfaceMaterial(t.nose, t.band, 'nose')
+            }
+        });
+
+        // ceinture de repérage derrière l'ogive
+        add(L / 2 - noseLen - 0.06, 0, 0, {
+            cylinder: { length: 0.09, topRadius: r * 1.02, bottomRadius: r * 1.02, material: solid(t.band) }
+        });
+
+        // culot : convergent pour un missile, boîte d'empennage pour une bombe
+        add(-L / 2 + tailLen / 2, 0, 0, {
+            cylinder: {
+                length: tailLen, topRadius: r, bottomRadius: r * (isBomb ? 0.58 : 0.74),
+                material: solid(isBomb ? '#2b332b' : '#6b7178')
+            }
+        });
+
+        // tuyère
+        if (!isBomb) {
+            add(-L / 2 + 0.05, 0, 0, {
+                cylinder: { length: 0.11, topRadius: r * 0.60, bottomRadius: r * 0.50, material: solid('#25282b') }
+            });
+        }
+
+        // ailettes arrière, en croix en X
+        [45, 135, 225, 315].forEach(deg => {
+            add(-L / 2 + tailLen * 0.55, r + finSpan / 2, deg, {
+                box: {
+                    dimensions: new Cesium.Cartesian3(finSpan, 0.018, finChord),
+                    material: solid(isBomb ? '#394139' : '#8d949b')
+                }
+            });
+        });
+
+        // canards avant des missiles à guidage infrarouge
+        if (!isBomb && t.canards) {
+            [45, 135, 225, 315].forEach(deg => {
+                add(L / 2 - noseLen - 0.24, r + finSpan * 0.16, deg, {
+                    box: {
+                        dimensions: new Cesium.Cartesian3(finSpan * 0.45, 0.016, finChord * 0.5),
+                        material: solid('#8d949b')
+                    }
+                });
+            });
+        }
+
+        return parts;
+    }
+
+    function buildMissile(getPos, getDir, t) {
+        return buildModel(getPos, getDir, t, false);
+    }
+
+    function buildBomb(getPos, getDir) {
+        return buildModel(getPos, getDir, BOMB_TYPE, true);
+    }
+
+    function makeHardpoint(st, kind) {
+        const dir = () => {
+            const fr = currentFrame();
+            return fr ? fr.F : null;
+        };
+        st.parts = kind === 'missile'
+            ? buildMissile(() => stationPos(st), dir, currentType())
+            : buildBomb(() => stationPos(st), dir);
     }
 
     function buildStations(profile) {
@@ -877,9 +1010,12 @@
         // voilure y est exact (0,21 m sur le Su-35) alors que les points de
         // collision ne décrivent que le fuselage. Repli : 25 cm sous le plan
         // annoncé par le modèle, sinon sous le ventre.
-        const wingU = wingOk
+        // Un gros missile pend plus bas : on descend l'axe pour que le dessus du
+        // corps reste collé sous la voilure quel que soit le calibre choisi.
+        const droop = Math.max(0, currentType().caliber / 2 - 0.10);
+        const wingU = (wingOk
             ? wing.z0 - 0.18
-            : ((g.wingZ !== null && isFinite(g.wingZ)) ? g.wingZ - 0.25 : g.belly * 0.55);
+            : ((g.wingZ !== null && isFinite(g.wingZ)) ? g.wingZ - 0.25 : g.belly * 0.55)) - droop;
 
         // --- Missiles : sous les ailes, par paires symétriques ---
         // Les quatre premières paires se répartissent le long de la vraie
@@ -915,8 +1051,7 @@
                 y: y,
                 z: z,
                 used: false,
-                body: null,
-                nose: null
+                parts: []
             };
             makeHardpoint(st, 'missile');
             S.stations.push(st);
@@ -926,9 +1061,9 @@
         // Jamais plus bas que 1,20 m sous le dessous de voilure : sur un
         // bombardier le train touche beaucoup plus bas que la soute.
         const under = wingOk ? wing.z0 : g.wingZ;
-        const bombU = (under !== null && isFinite(under))
+        const bombU = ((under !== null && isFinite(under))
             ? Math.max(g.belly - 0.25, under - 1.2)
-            : g.belly - 0.25;
+            : g.belly - 0.25) - Math.max(0, BOMB_TYPE.caliber / 2 - 0.20);
         const nb = profile.bombs || 0;
         const rows = Math.max(1, Math.ceil(nb / 2));
         for (let i = 0; i < nb; i++) {
@@ -941,8 +1076,7 @@
                 y: g.halfLen * (0.22 - 0.42 * t),
                 z: bombU,
                 used: false,
-                body: null,
-                nose: null
+                parts: []
             };
             makeHardpoint(st, 'bomb');
             S.bombStations.push(st);
@@ -1023,7 +1157,8 @@
             return;
         }
         S.typeIndex = (S.typeIndex + 1) % MISSILE_TYPES.length;
-        refreshStationMaterials();
+        // Le calibre change : on replace les emports (autorisé, on n'est pas armé).
+        if (S.profile) buildStations(S.profile);
         const t = currentType();
         toast('Missile : ' + t.name + ' — portée ' + Math.round(t.range / 1000) + ' km', '#8ef6ff');
         updateHUD();
@@ -1116,10 +1251,10 @@
         const t = currentType();
 
         const st = S.stations.find(s => !s.used);
-        const pos = st ? stationPos(st) : offsetPos(fr, 0, 2.5, -1);
+        const pos = st ? stationPos(st, fr) : offsetPos(fr, 0, 2.5, -1);
         if (st) {
             st.used = true;
-            try { st.body.show = false; st.nose.show = false; } catch (e) { }
+            (st.parts || []).forEach(e => { try { e.show = false; } catch (err) { } });
         }
         if (!pos) return;
 
@@ -1148,29 +1283,14 @@
 
         const v = viewer();
         m.vis = {
-            body: v.entities.add({
-                position: new Cesium.CallbackProperty(() => m.pos, false),
-                orientation: new Cesium.CallbackProperty(() => quatFromZ(m.dir), false),
-                cylinder: {
-                    length: 2.6, topRadius: 0.10, bottomRadius: 0.10,
-                    material: surfaceMaterial(t.body, t.band, 'missile')
-                }
-            }),
-            nose: v.entities.add({
-                position: new Cesium.CallbackProperty(() => along(m.pos, m.dir, 1.6), false),
-                orientation: new Cesium.CallbackProperty(() => quatFromZ(m.dir), false),
-                cylinder: {
-                    length: 0.6, topRadius: 0, bottomRadius: 0.10,
-                    material: surfaceMaterial(t.nose, t.band, 'nose')
-                }
-            }),
+            parts: buildMissile(() => m.pos, () => m.dir, t),
             flame: v.entities.add({
-                position: new Cesium.CallbackProperty(() => along(m.pos, m.dir, -1.45), false),
+                position: new Cesium.CallbackProperty(() => along(m.pos, m.dir, -(t.length / 2) - 0.12), false),
                 point: {
-                    pixelSize: 9,
-                    color: Cesium.Color.fromCssColorString('#ffb347'),
-                    outlineColor: Cesium.Color.fromCssColorString('#ff6a00').withAlpha(0.8),
-                    outlineWidth: 2
+                    pixelSize: 11,
+                    color: Cesium.Color.fromCssColorString('#ffd08a'),
+                    outlineColor: Cesium.Color.fromCssColorString('#ff6a00').withAlpha(0.85),
+                    outlineWidth: 3
                 }
             })
         };
@@ -1185,8 +1305,7 @@
 
     function removeMissile(m) {
         const v = viewer();
-        try { v.entities.remove(m.vis.body); } catch (e) { }
-        try { v.entities.remove(m.vis.nose); } catch (e) { }
+        (m.vis.parts || []).forEach(e => { try { v.entities.remove(e); } catch (err) { } });
         try { v.entities.remove(m.vis.flame); } catch (e) { }
         try { v.entities.remove(m.trail); } catch (e) { }
     }
@@ -1274,11 +1393,11 @@
 
         const st = S.bombStations.find(s => !s.used);
         if (!st) return;
-        const pos0 = stationPos(st);
+        const pos0 = stationPos(st, fr);
         if (!pos0) return;
 
         st.used = true;
-        try { st.body.show = false; } catch (e) { }
+        (st.parts || []).forEach(e => { try { e.show = false; } catch (err) { } });
 
         const ac = geofs.aircraft.instance;
         const speed = ac.trueSpeed || ac.groundSpeed || 0;
@@ -1302,14 +1421,7 @@
             t: 0
         };
 
-        v.body = viewer().entities.add({
-            position: new Cesium.CallbackProperty(() => v.pos, false),
-            orientation: new Cesium.CallbackProperty(() => quatFromZ(v.dir), false),
-            cylinder: {
-                length: 1.6, topRadius: 0.20, bottomRadius: 0.20,
-                material: surfaceMaterial('#3f4a3f', '#2b332b', 'bomb')
-            }
-        });
+        v.parts = buildBomb(() => v.pos, () => v.dir);
 
         S.bombsInAir.push(v);
         S.bombs--;
@@ -1340,7 +1452,7 @@
             const impact = carto && (alt - groundHeight(carto)) < 2.5;
 
             if (impact || b.t > CFG.bombLifetime) {
-                try { viewer().entities.remove(b.body); } catch (e) { }
+                (b.parts || []).forEach(e => { try { viewer().entities.remove(e); } catch (err) { } });
                 S.bombsInAir.splice(i, 1);
                 spawnExplosion(b.pos, impact ? 2.0 : 1.0);
             }
@@ -1543,7 +1655,7 @@
         S.bombs = S.profile.bombs || 0;
         S.stations.concat(S.bombStations).forEach(s => {
             s.used = false;
-            try { s.body.show = true; if (s.nose) s.nose.show = true; } catch (e) { }
+            (s.parts || []).forEach(e => { try { e.show = true; } catch (err) { } });
         });
         toast('Réarmement complet — ' + S.loadout + ' missiles, ' + S.bombs + ' bombes', '#8ef6ff');
         updateHUD();
