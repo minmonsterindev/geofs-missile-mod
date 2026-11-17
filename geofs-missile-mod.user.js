@@ -848,4 +848,812 @@
                 cylinder: { length: 0.6, topRadius: 0, bottomRadius: 0.10, material: surfaceMaterial(t.nose, t.band, 'nose') }
             });
         }
-    SPACER_LINE_845
+    }
+
+    // Met à jour l'apparence des missiles déjà accrochés aux ailes.
+    function refreshStationMaterials() {
+        const t = currentType();
+        S.stations.forEach(st => {
+            try { st.body.cylinder.material = surfaceMaterial(t.body, t.band, 'missile'); } catch (e) { }
+            try { st.nose.cylinder.material = surfaceMaterial(t.nose, t.band, 'nose'); } catch (e) { }
+        });
+    }
+
+    function buildStations(profile) {
+        clearStations();
+        if (!profile) { S.loadout = 0; S.bombs = 0; return; }
+
+        const g = S.geo;
+        const wing = g.wing;
+
+        // La boîte trouvée n'est retenue que si elle ressemble vraiment à une
+        // aile : assez d'envergure et atteignant le bout. Sinon on tombe sur un
+        // volet (Rafale) ou sur rien du tout (F-16, aile fondue dans le body).
+        const wingTip = wing ? Math.max(Math.abs(wing.x0), Math.abs(wing.x1)) : 0;
+        const wingRoot = wing ? Math.min(Math.abs(wing.x0), Math.abs(wing.x1)) : 0;
+        const wingOk = !!wing && (wingTip - wingRoot) > 0.5 * g.halfSpan && wingTip > 0.75 * g.halfSpan;
+
+        // Hauteur sous l'aile. Priorité au maillage validé : le dessous de
+        // voilure y est exact (0,21 m sur le Su-35) alors que les points de
+        // collision ne décrivent que le fuselage. Repli : 25 cm sous le plan
+        // annoncé par le modèle, sinon sous le ventre.
+        const wingU = wingOk
+            ? wing.z0 - 0.18
+            : ((g.wingZ !== null && isFinite(g.wingZ)) ? g.wingZ - 0.25 : g.belly * 0.55);
+
+        // --- Missiles : sous les ailes, par paires symétriques ---
+        // Les quatre premières paires se répartissent le long de la vraie
+        // aile (racine -> bout), les deux dernières vont sous le fuselage.
+        // GeoFS ne nomme aucun pylône : il n'y a rien de plus précis à lire.
+        const wingSlots = WING_SLOTS.length - 2;
+        const n = profile.missiles || 0;
+        for (let i = 0; i < n; i++) {
+            const side = (i % 2 === 0) ? 1 : -1;
+            const k = Math.floor(i / 2);
+            let x, y, z;
+            if (wingOk && k < wingSlots) {
+                // La boîte du maillage est celle d'UNE aile : on repart de sa
+                // racine vers son bout, puis l'alternance place l'autre côté.
+                x = wingRoot + WING_SLOTS[k][0] * (wingTip - wingRoot);
+                y = wing.y0 + 0.55 * (wing.y1 - wing.y0);
+                z = wingU;
+            } else if (k < wingSlots) {
+                x = WING_SLOTS[k][0] * g.halfSpan;
+                y = g.halfLen * WING_SLOTS[k][1];
+                z = wingU;
+            } else {
+                // sous le fuselage : deux paires décalées, sinon elles se
+                // superposent exactement au même point.
+                const j = k - wingSlots;
+                x = (0.10 + 0.06 * j) * g.halfSpan;
+                y = j ? -0.10 * g.halfLen : 0.05 * g.halfLen;
+                z = g.belly - 0.22 - 0.04 * j;
+            }
+            const st = {
+                kind: 'missile',
+                x: side * x,
+                y: y,
+                z: z,
+                used: false,
+                body: null,
+                nose: null
+            };
+            makeHardpoint(st, 'missile');
+            S.stations.push(st);
+        }
+
+        // --- Bombes : sous le ventre, deux colonnes ---
+        // Jamais plus bas que 1,20 m sous le dessous de voilure : sur un
+        // bombardier le train touche beaucoup plus bas que la soute.
+        const under = wingOk ? wing.z0 : g.wingZ;
+        const bombU = (under !== null && isFinite(under))
+            ? Math.max(g.belly - 0.25, under - 1.2)
+            : g.belly - 0.25;
+        const nb = profile.bombs || 0;
+        const rows = Math.max(1, Math.ceil(nb / 2));
+        for (let i = 0; i < nb; i++) {
+            const side = (i % 2 === 0) ? 1 : -1;
+            const row = Math.floor(i / 2);
+            const t = rows > 1 ? row / (rows - 1) : 0.5;
+            const st = {
+                kind: 'bomb',
+                x: side * 0.09 * g.halfSpan,
+                y: g.halfLen * (0.22 - 0.42 * t),
+                z: bombU,
+                used: false,
+                body: null,
+                nose: null
+            };
+            makeHardpoint(st, 'bomb');
+            S.bombStations.push(st);
+        }
+
+        S.loadout = profile.missiles || 0;
+        S.bombs = profile.bombs || 0;
+
+        // Les repères de calibrage suivent les emports qu'ils désignent.
+        if (S.calMode) buildCalMarkers();
+    }
+
+    /* ========================= CIBLES / RADAR ========================== */
+
+    function userLLA(u) {
+        if (!u) return null;
+        const candidates = [
+            u.referencePoint && u.referencePoint.lla,
+            u.llaLocation,
+            u.lla
+        ];
+        for (let i = 0; i < candidates.length; i++) {
+            const l = candidates[i];
+            if (l && l.length >= 2 && isFinite(l[0]) && isFinite(l[1]) && (l[0] !== 0 || l[1] !== 0)) {
+                return [l[0], l[1], l[2] || 0];
+            }
+        }
+        return null;
+    }
+
+    function refreshContacts() {
+        const Cesium = C();
+        const fr = playerFrame();
+        S.contactsAt = performance.now();
+        if (!fr || !window.multiplayer) { S.contacts = []; return; }
+
+        const users = {};
+        try { Object.assign(users, mp().users || {}); } catch (e) { }
+        try { Object.assign(users, mp().visibleUsers || {}); } catch (e) { }
+
+        const myId = String((geofs.aircraft.instance && geofs.aircraft.instance.id) || '');
+        const list = [];
+        Object.keys(users).forEach(id => {
+            if (id === myId || id === 'selfplayer') return;
+            const u = users[id];
+            const lla = userLLA(u);
+            if (!lla) return;
+            let pos;
+            try { pos = Cesium.Cartesian3.fromDegrees(lla[1], lla[0], lla[2]); } catch (e) { return; }
+            const d = Cesium.Cartesian3.distance(fr.origin, pos);
+            if (!isFinite(d)) return;
+            list.push({
+                id: id,
+                name: (u.callsign || u.name || ('#' + id)).toString().slice(0, 16),
+                pos: pos,
+                lla: lla,
+                dist: d
+            });
+        });
+        list.sort((a, b) => a.dist - b.dist);
+        S.contacts = list;
+    }
+
+    function findContact(id) {
+        if (!id) return null;
+        for (let i = 0; i < S.contacts.length; i++) {
+            if (S.contacts[i].id === id) return S.contacts[i];
+        }
+        return null;
+    }
+
+    // Changement de type de missile : seulement avant l'armement.
+    function cycleMissileType() {
+        if (!S.ready) return;
+        if (!S.profile || !S.profile.missiles) { toast('Cet avion n\'emporte pas de missiles', '#ffce54'); return; }
+        if (S.armed) {
+            toast('Désarme d\'abord (' + keyLabel(CFG.keys.arm) + ') pour changer de missile', '#ffce54');
+            return;
+        }
+        S.typeIndex = (S.typeIndex + 1) % MISSILE_TYPES.length;
+        refreshStationMaterials();
+        const t = currentType();
+        toast('Missile : ' + t.name + ' — portée ' + Math.round(t.range / 1000) + ' km', '#8ef6ff');
+        updateHUD();
+    }
+
+    function cycleTarget() {
+        if (!S.armed) { toast('Système non armé — [' + CFG.keys.arm.toUpperCase() + ']', '#ffce54'); return; }
+        const inRange = S.contacts.filter(c => c.dist <= lockRange());
+        if (!inRange.length) { toast('Aucun contact dans la portée radar', '#ffce54'); S.targetId = null; return; }
+        const idx = inRange.findIndex(c => c.id === S.targetId);
+        const next = inRange[(idx + 1) % inRange.length];
+        S.targetId = next.id;
+        toast('Verrouillé : ' + next.name + ' — ' + (next.dist / 1000).toFixed(1) + ' km', '#8ef6ff');
+    }
+
+    function updateLock() {
+        if (!S.ui) return;
+        const Cesium = C();
+        const ret = S.ui.reticle;
+
+        if (!S.armed || !S.targetId) { ret.style.display = 'none'; return; }
+
+        const c = findContact(S.targetId);
+        if (!c || c.dist > lockRange() * 1.4) { S.targetId = null; ret.style.display = 'none'; return; }
+
+        const users = (mp().users && mp().users[c.id]) || (mp().visibleUsers && mp().visibleUsers[c.id]);
+        const lla = userLLA(users) || c.lla;
+        try { c.pos = Cesium.Cartesian3.fromDegrees(lla[1], lla[0], lla[2]); } catch (e) { }
+
+        const scene = viewer().scene;
+        const cam = scene && scene.camera;
+        if (cam && cam.position && cam.direction) {
+            const toTgt = Cesium.Cartesian3.subtract(c.pos, cam.position, new Cesium.Cartesian3());
+            const d = Cesium.Cartesian3.magnitude(toTgt);
+            if (d > 1 && Cesium.Cartesian3.dot(toTgt, cam.direction) / d < 0.02) {
+                ret.style.display = 'none';
+                return;
+            }
+        }
+
+        const sp = worldToScreen(c.pos);
+        if (!sp) { ret.style.display = 'none'; return; }
+
+        ret.style.display = 'block';
+        ret.style.left = sp.x + 'px';
+        ret.style.top = sp.y + 'px';
+        const ac = geofs.aircraft.instance;
+        const vc = ((ac.trueSpeed || ac.groundSpeed || 0) - 250);
+        S.ui.reticleLabel.textContent = c.name + '  ' + (c.dist / 1000).toFixed(1) + 'km  ' +
+            (vc > 0 ? '+' : '') + Math.round(vc) + 'm/s';
+    }
+
+    /* ============================ MISSILES ============================= */
+
+    function makeTrail(m) {
+        const Cesium = C();
+        return viewer().entities.add({
+            polyline: {
+                positions: new Cesium.CallbackProperty(() => m.trailPts, false),
+                width: 2.5,
+                material: new Cesium.PolylineGlowMaterialProperty({
+                    glowPower: 0.22,
+                    color: Cesium.Color.fromCssColorString('#f2f2f2').withAlpha(0.55)
+                }),
+                arcType: Cesium.ArcType.NONE
+            }
+        });
+    }
+
+    function fire() {
+        if (!S.ready) return;
+        if (!S.armed) { toast('Système non armé — [' + CFG.keys.arm.toUpperCase() + ']', '#ffce54'); return; }
+        if (!S.profile) { toast('Avion non militaire', '#ffce54'); return; }
+        if (!S.profile.missiles) {
+            // Bombardier pur : Q largue directement une bombe.
+            if (S.profile.bombs) return dropBomb();
+            toast('Cet avion n\'emporte aucun armement', '#ffce54');
+            return;
+        }
+        if (S.loadout <= 0) { toast('Plus de missiles — [' + CFG.keys.reload.toUpperCase() + '] pour réarmer', '#ff5a3c'); return; }
+        if (S.missiles.length >= CFG.maxActive) { toast('Trop de missiles en vol', '#ffce54'); return; }
+
+        const now = performance.now();
+        if (now < S.cooldownUntil) return;
+        S.cooldownUntil = now + CFG.cooldown;
+
+        const Cesium = C();
+        const fr = playerFrame();
+        if (!fr) return;
+        const t = currentType();
+
+        const st = S.stations.find(s => !s.used);
+        const pos = st ? stationPos(st) : offsetPos(fr, 0, 2.5, -1);
+        if (st) {
+            st.used = true;
+            try { st.body.show = false; st.nose.show = false; } catch (e) { }
+        }
+        if (!pos) return;
+
+        const ac = geofs.aircraft.instance;
+        const speed = Math.max(CFG.minLaunchSpeed, ac.trueSpeed || ac.groundSpeed || 0);
+        const tgt = S.targetId ? findContact(S.targetId) : null;
+
+        const m = {
+            pos: Cesium.Cartesian3.clone(pos, new Cesium.Cartesian3()),
+            dir: Cesium.Cartesian3.clone(fr.F, new Cesium.Cartesian3()),
+            speed: speed,
+            t: 0,
+            // Caractéristiques figées au tir : chaque missile garde son type.
+            typeName: t.name,
+            maxSpeed: t.maxSpeed,
+            accel: t.accel,
+            turnRate: t.turnRate,
+            life: t.life,
+            proximity: t.proximity,
+            targetId: tgt ? tgt.id : null,
+            targetName: tgt ? tgt.name : '',
+            trailPts: [],
+            vis: null,
+            trail: null
+        };
+
+        const v = viewer();
+        m.vis = {
+            body: v.entities.add({
+                position: new Cesium.CallbackProperty(() => m.pos, false),
+                orientation: new Cesium.CallbackProperty(() => quatFromZ(m.dir), false),
+                cylinder: {
+                    length: 2.6, topRadius: 0.10, bottomRadius: 0.10,
+                    material: surfaceMaterial(t.body, t.band, 'missile')
+                }
+            }),
+            nose: v.entities.add({
+                position: new Cesium.CallbackProperty(() => along(m.pos, m.dir, 1.6), false),
+                orientation: new Cesium.CallbackProperty(() => quatFromZ(m.dir), false),
+                cylinder: {
+                    length: 0.6, topRadius: 0, bottomRadius: 0.10,
+                    material: surfaceMaterial(t.nose, t.band, 'nose')
+                }
+            }),
+            flame: v.entities.add({
+                position: new Cesium.CallbackProperty(() => along(m.pos, m.dir, -1.45), false),
+                point: {
+                    pixelSize: 9,
+                    color: Cesium.Color.fromCssColorString('#ffb347'),
+                    outlineColor: Cesium.Color.fromCssColorString('#ff6a00').withAlpha(0.8),
+                    outlineWidth: 2
+                }
+            })
+        };
+        m.trail = makeTrail(m);
+
+        S.missiles.push(m);
+        S.loadout--;
+        playLaunch();
+        toast('🚀 ' + t.name + (tgt ? ' → ' + tgt.name : ' — tir direct'), '#8ef6ff');
+        updateHUD();
+    }
+
+    function removeMissile(m) {
+        const v = viewer();
+        try { v.entities.remove(m.vis.body); } catch (e) { }
+        try { v.entities.remove(m.vis.nose); } catch (e) { }
+        try { v.entities.remove(m.vis.flame); } catch (e) { }
+        try { v.entities.remove(m.trail); } catch (e) { }
+    }
+
+    function updateMissiles(dt) {
+        const Cesium = C();
+        for (let i = S.missiles.length - 1; i >= 0; i--) {
+            const m = S.missiles[i];
+            m.t += dt;
+            m.speed = Math.min(m.maxSpeed, m.speed + m.accel * dt);
+
+            let tp = null;
+            if (m.targetId) {
+                const c = findContact(m.targetId);
+                if (c) {
+                    const users = (mp().users && mp().users[c.id]) || (mp().visibleUsers && mp().visibleUsers[c.id]);
+                    const lla = userLLA(users) || c.lla;
+                    try { tp = Cesium.Cartesian3.fromDegrees(lla[1], lla[0], lla[2]); } catch (e) { tp = null; }
+                }
+                if (!tp) m.targetId = null;
+            }
+
+            if (tp) {
+                const toT = Cesium.Cartesian3.normalize(
+                    Cesium.Cartesian3.subtract(tp, m.pos, new Cesium.Cartesian3()),
+                    new Cesium.Cartesian3()
+                );
+                const k = Math.min(1, m.turnRate * dt);
+                const blend = Cesium.Cartesian3.add(
+                    Cesium.Cartesian3.multiplyByScalar(m.dir, 1 - k, new Cesium.Cartesian3()),
+                    Cesium.Cartesian3.multiplyByScalar(toT, k, new Cesium.Cartesian3()),
+                    new Cesium.Cartesian3()
+                );
+                const mag = Cesium.Cartesian3.magnitude(blend);
+                if (mag > 1e-5) Cesium.Cartesian3.divideByScalar(blend, mag, m.dir);
+                else Cesium.Cartesian3.clone(toT, m.dir);
+            }
+
+            const prev = Cesium.Cartesian3.clone(m.pos, new Cesium.Cartesian3());
+            const step = m.speed * dt;
+            Cesium.Cartesian3.add(
+                m.pos,
+                Cesium.Cartesian3.multiplyByScalar(m.dir, step, new Cesium.Cartesian3()),
+                m.pos
+            );
+
+            const carto = Cesium.Cartographic.fromCartesian(m.pos);
+            const alt = carto ? carto.height : 0;
+
+            let hit = false, splash = false;
+            if (tp && distPointSegment(tp, prev, m.pos) < m.proximity) { hit = true; splash = true; }
+            else if (carto && (alt - groundHeight(carto)) < 2) { hit = true; }
+            else if (m.t > m.life) { hit = true; }
+
+            if (hit) {
+                removeMissile(m);
+                S.missiles.splice(i, 1);
+                spawnExplosion(m.pos, splash ? 1.25 : 0.85);
+                if (splash) toast('💥 SPLASH — ' + (m.targetName || 'cible'), '#ff5a3c');
+                continue;
+            }
+
+            m.trailPts.push(Cesium.Cartesian3.clone(m.pos, new Cesium.Cartesian3()));
+            if (m.trailPts.length > CFG.trailPoints) m.trailPts.shift();
+        }
+    }
+
+    /* ============================== BOMBES ============================= */
+
+    function dropBomb() {
+        if (!S.ready) return;
+        if (!S.armed) { toast('Système non armé — [' + CFG.keys.arm.toUpperCase() + ']', '#ffce54'); return; }
+        if (!S.profile) { toast('Avion non militaire', '#ffce54'); return; }
+        if (!S.profile.bombs) { toast('Cet avion n\'emporte pas de bombes', '#ffce54'); return; }
+        if (S.bombs <= 0) { toast('Plus de bombes — [' + CFG.keys.reload.toUpperCase() + '] pour réarmer', '#ff5a3c'); return; }
+        if (S.bombsInAir.length >= CFG.maxBombsActive) { toast('Trop de bombes en vol', '#ffce54'); return; }
+
+        const now = performance.now();
+        if (now < S.bombCooldownUntil) return;
+        S.bombCooldownUntil = now + CFG.bombCooldown;
+
+        const Cesium = C();
+        const fr = playerFrame();
+        if (!fr) return;
+
+        const st = S.bombStations.find(s => !s.used);
+        if (!st) return;
+        const pos0 = stationPos(st);
+        if (!pos0) return;
+
+        st.used = true;
+        try { st.body.show = false; } catch (e) { }
+
+        const ac = geofs.aircraft.instance;
+        const speed = ac.trueSpeed || ac.groundSpeed || 0;
+
+        // Vitesse initiale = celle de l'avion, mais on supprime toute composante
+        // ascendante et on ajoute une petite poussée vers le bas : la bombe ne
+        // monte jamais, même si l'appareil est cabré.
+        const up = Cesium.Cartesian3.normalize(Cesium.Cartesian3.clone(pos0, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+        const vel = Cesium.Cartesian3.multiplyByScalar(fr.F, speed, new Cesium.Cartesian3());
+        const vUp = Cesium.Cartesian3.dot(vel, up);
+        if (vUp > 0) {
+            Cesium.Cartesian3.add(vel, Cesium.Cartesian3.multiplyByScalar(up, -vUp, new Cesium.Cartesian3()), vel);
+        }
+        Cesium.Cartesian3.add(vel, Cesium.Cartesian3.multiplyByScalar(up, -3, new Cesium.Cartesian3()), vel);
+
+        const v = {
+            body: null,
+            pos: Cesium.Cartesian3.clone(pos0, new Cesium.Cartesian3()),
+            vel: vel,
+            dir: Cesium.Cartesian3.normalize(Cesium.Cartesian3.clone(vel, new Cesium.Cartesian3()), new Cesium.Cartesian3()),
+            t: 0
+        };
+
+        v.body = viewer().entities.add({
+            position: new Cesium.CallbackProperty(() => v.pos, false),
+            orientation: new Cesium.CallbackProperty(() => quatFromZ(v.dir), false),
+            cylinder: {
+                length: 1.6, topRadius: 0.20, bottomRadius: 0.20,
+                material: surfaceMaterial('#3f4a3f', '#2b332b', 'bomb')
+            }
+        });
+
+        S.bombsInAir.push(v);
+        S.bombs--;
+        noiseBurst(0.25, 320, 1.2, 0.12, 'lowpass');
+        toast('💣 Bombe larguée — ' + S.bombs + ' restantes', '#ffce54');
+        updateHUD();
+    }
+
+    function updateBombs(dt) {
+        const Cesium = C();
+        for (let i = S.bombsInAir.length - 1; i >= 0; i--) {
+            const b = S.bombsInAir[i];
+            b.t += dt;
+
+            // Gravité vers le bas local (radial ECEF) + traînée.
+            const up = Cesium.Cartesian3.normalize(Cesium.Cartesian3.clone(b.pos, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+            Cesium.Cartesian3.add(b.vel, Cesium.Cartesian3.multiplyByScalar(up, -CFG.bombGravity * dt, new Cesium.Cartesian3()), b.vel);
+            Cesium.Cartesian3.multiplyByScalar(b.vel, Math.max(0, 1 - CFG.bombDrag * dt), b.vel);
+
+            const speed = Cesium.Cartesian3.magnitude(b.vel);
+            Cesium.Cartesian3.add(b.pos, Cesium.Cartesian3.multiplyByScalar(b.vel, dt, new Cesium.Cartesian3()), b.pos);
+
+            // La bombe suit sa trajectoire (nez vers le bas).
+            if (speed > 1e-3) Cesium.Cartesian3.divideByScalar(b.vel, speed, b.dir);
+
+            const carto = Cesium.Cartographic.fromCartesian(b.pos);
+            const alt = carto ? carto.height : 0;
+            const impact = carto && (alt - groundHeight(carto)) < 2.5;
+
+            if (impact || b.t > CFG.bombLifetime) {
+                try { viewer().entities.remove(b.body); } catch (e) { }
+                S.bombsInAir.splice(i, 1);
+                spawnExplosion(b.pos, impact ? 2.0 : 1.0);
+            }
+        }
+    }
+
+    /* ============================ EXPLOSIONS =========================== */
+
+    function spawnExplosion(pos, scale) {
+        const Cesium = C();
+        const v = viewer();
+        try {
+            const fire = v.entities.add({
+                position: Cesium.Cartesian3.clone(pos, new Cesium.Cartesian3()),
+                ellipsoid: {
+                    radii: new Cesium.Cartesian3(1, 1, 1),
+                    material: Cesium.Color.fromCssColorString('#ffb100').withAlpha(0.95)
+                }
+            });
+            const smoke = v.entities.add({
+                position: Cesium.Cartesian3.clone(pos, new Cesium.Cartesian3()),
+                ellipsoid: {
+                    radii: new Cesium.Cartesian3(1, 1, 1),
+                    material: Cesium.Color.fromCssColorString('#4a4a4a').withAlpha(0.5)
+                }
+            });
+            S.fx.push({ t: 0, dur: 1.1, kind: 'fire', e: fire, scale: scale });
+            S.fx.push({ t: 0, dur: scale > 1.5 ? 6.0 : 4.2, kind: 'smoke', e: smoke, scale: scale });
+            playBoom();
+        } catch (e) { warn('explosion', e); }
+    }
+
+    function updateFx(dt) {
+        const Cesium = C();
+        const v = viewer();
+        for (let i = S.fx.length - 1; i >= 0; i--) {
+            const f = S.fx[i];
+            f.t += dt;
+            const p = f.t / f.dur;
+            if (p >= 1) {
+                try { v.entities.remove(f.e); } catch (e) { }
+                S.fx.splice(i, 1);
+                continue;
+            }
+            const ease = 1 - Math.pow(1 - p, 3);
+            const maxR = (f.kind === 'fire' ? 45 : 130) * f.scale;
+            const r = 1 + maxR * ease;
+            const base = f.kind === 'fire' ? 0.95 : 0.5;
+            try {
+                f.e.ellipsoid.radii = new Cesium.ConstantProperty(new Cesium.Cartesian3(r, r, r));
+                f.e.ellipsoid.material = new Cesium.ColorMaterialProperty(
+                    (f.kind === 'fire'
+                        ? Cesium.Color.fromCssColorString('#ff8a00')
+                        : Cesium.Color.fromCssColorString('#4a4a4a')).withAlpha(base * (1 - p))
+                );
+            } catch (e) { }
+        }
+    }
+
+    /* ============================== HUD MAJ ============================= */
+
+    function updateHUD() {
+        if (!S.ui || !S.ready) return;
+        const ac = geofs.aircraft.instance;
+        const name = S.profile ? S.profile.name : (aircraftName(ac) || 'inconnu');
+        const c = S.targetId ? findContact(S.targetId) : null;
+
+        const stateLine = !S.profile
+            ? '<span class="dim">avion non militaire</span>'
+            : (S.armed ? '<span class="armed">● ARMÉ</span>' : '<span class="dim">○ SAFE</span>');
+
+        let tgtLine = '<span class="dim">aucune</span>';
+        if (c) tgtLine = '<b>' + c.name + '</b> <span class="v">' + (c.dist / 1000).toFixed(1) + ' km</span>';
+
+        let loadLine = '';
+        if (S.profile) {
+            if (S.profile.missiles) {
+                loadLine += 'Missiles : <b>' + S.loadout + '</b> / ' + S.profile.missiles +
+                    ' <span class="dim">(' + S.missiles.length + ' en vol)</span>';
+                loadLine += '<br>Type &nbsp;&nbsp;&nbsp;&nbsp;: <span class="v">' + currentType().name + '</span>' +
+                    ' <span class="dim">[' + keyLabel(CFG.keys.type) + ']</span>';
+            }
+            if (S.profile.bombs) {
+                if (loadLine) loadLine += '<br>';
+                loadLine += 'Bombes &nbsp;&nbsp;: <b>' + S.bombs + '</b> / ' + S.profile.bombs +
+                    ' <span class="dim">(' + S.bombsInAir.length + ' en vol)</span>';
+            }
+            if (!loadLine) loadLine = '<span class="dim">pas d\'emport</span>';
+        } else {
+            loadLine = '<span class="dim">—</span>';
+        }
+
+        let calLine = '';
+        if (S.calMode) {
+            const k = calFor();
+            calLine = '<div class="cal">CALIBRAGE : span ' + k.span.toFixed(2) +
+                ' | haut ' + k.u.toFixed(2) + ' | avant ' + k.f.toFixed(2) +
+                '<br>² avancer · , reculer · ) ( écartement · ] [ hauteur · Retour arrière = reset</div>';
+        }
+
+        S.ui.hud.innerHTML =
+            '<b>◈ SYSTÈME D\'ARMEMENT</b> &nbsp;' + stateLine + '<br>' +
+            'Avion &nbsp;&nbsp;&nbsp;: <span class="v">' + name + '</span><br>' +
+            loadLine + '<br>' +
+            'Cible &nbsp;&nbsp;&nbsp;: ' + tgtLine + '<br>' +
+            'Contacts : <span class="v">' + S.contacts.length + '</span>' +
+            ' <span class="dim">(' + Math.round(lockRange() / 1000) + ' km)</span>' +
+            calLine +
+            '<div class="keys">' +
+            '[' + keyLabel(CFG.keys.arm) + '] armer &nbsp; ' +
+            '[' + keyLabel(CFG.keys.fire) + '] missile &nbsp; ' +
+            '[' + keyLabel(CFG.keys.type) + '] type<br>' +
+            '[' + keyLabel(CFG.keys.target) + '] cible &nbsp; ' +
+            '[' + keyLabel(CFG.keys.bomb) + '] bombe<br>' +
+            '[' + keyLabel(CFG.keys.reload) + '] réarmer &nbsp; ' +
+            '[' + keyLabel(CFG.keys.calibrate) + '] calibrage' +
+            '</div>';
+    }
+
+    /* =========================== BOUCLE DE JEU ========================= */
+
+    function checkAircraft() {
+        const ac = geofs.aircraft.instance;
+        if (!ac) return;
+        const name = aircraftName(ac);
+        const key = String(ac.id || '') + '|' + name;
+        if (key === S.aircraftKey) return;
+        S.aircraftKey = key;
+
+        S.profile = detectProfile(name);
+        S.geo = aircraftGeometry(S.profile || GENERIC_FRAME);
+        clearStations();
+        buildStations(S.profile);
+        S.targetId = null;
+        S.armed = false;
+        updateHUD();
+        if (S.profile) {
+            log('Avion détecté : ' + name + ' (' + S.profile.name + ', ' + S.geo.halfSpan.toFixed(1) + ' m de demi-envergure)');
+            toast('Emports disponibles — [' + CFG.keys.arm.toUpperCase() + '] pour armer', '#39ff88');
+        }
+    }
+
+    // Le maillage arrive après le changement d'avion : si la boîte d'aile
+    // manquait au moment du calcul, on réessaie (deux fois par seconde) et on
+    // replace les emports dès qu'on l'a.
+    let wingAt = 0;
+    function retryWingBox() {
+        if (!S.profile || S.geo.wing) return;
+        const now = performance.now();
+        if (now - wingAt < 500) return;
+        wingAt = now;
+        const w = wingBox();
+        if (!w) return;
+        if (!S.stations.concat(S.bombStations).every(st => !st.used)) return;
+        S.geo.wing = w;
+        buildStations(S.profile);
+    }
+
+    function tick() {
+        if (!S.ready) return;
+        const now = performance.now();
+        const dt = Math.min(0.1, (now - (S.lastFrame || now)) / 1000);
+        S.lastFrame = now;
+
+        try {
+            checkAircraft();
+            retryWingBox();
+            if (now - S.contactsAt > 200) refreshContacts();
+            updateMissiles(dt);
+            updateBombs(dt);
+            updateFx(dt);
+            updateLock();
+            if (now - S.hudAt > 200) { S.hudAt = now; updateHUD(); }
+        } catch (e) {
+            warn('tick', e);
+        }
+    }
+
+    /* ============================== TOUCHES ============================ */
+
+    function toggleArm() {
+        if (!S.profile) { toast('Cet avion n\'emporte pas d\'armement', '#ffce54'); return; }
+        S.armed = !S.armed;
+        if (S.armed) {
+            refreshContacts();
+            const near = S.contacts.find(c => c.dist <= lockRange());
+            S.targetId = near ? near.id : null;
+            const n = (S.profile.missiles || 0) + (S.profile.bombs || 0);
+            toast('ARMÉ — ' + n + ' emports' + (near ? ' — cible : ' + near.name : ' — aucun contact'), '#ff5252');
+        } else {
+            S.targetId = null;
+            toast('SAFE — système désarmé', '#39ff88');
+        }
+        updateHUD();
+    }
+
+    function reload() {
+        if (!S.profile) return;
+        S.loadout = S.profile.missiles || 0;
+        S.bombs = S.profile.bombs || 0;
+        S.stations.concat(S.bombStations).forEach(s => {
+            s.used = false;
+            try { s.body.show = true; if (s.nose) s.nose.show = true; } catch (e) { }
+        });
+        toast('Réarmement complet — ' + S.loadout + ' missiles, ' + S.bombs + ' bombes', '#8ef6ff');
+        updateHUD();
+    }
+
+    function toggleCalibration() {
+        if (!S.profile) { toast('Aucun emport à calibrer', '#ffce54'); return; }
+        S.calMode = !S.calMode;
+        if (S.calMode) buildCalMarkers(); else clearCalMarkers();
+        toast(S.calMode
+            ? 'CALIBRAGE — ² avancer · , reculer · ) ( écarter/resserrer · ] [ descendre/monter · Retour arrière = reset'
+            : 'Calibrage terminé (sauvegardé)', S.calMode ? '#8ef6ff' : '#39ff88');
+        updateHUD();
+    }
+
+    function matchKey(e, binding) {
+        const parts = String(binding || '').toLowerCase().split('+').map(s => s.trim());
+        const key = parts[parts.length - 1];
+        if (!key) return false;
+        const pressed = String(e.key || '');
+
+        // Symboles (² $ * ! ; : ...) : ils demandent souvent Maj ou AltGr pour
+        // être produits, on ignore donc l'état des modificateurs.
+        const isSymbol = key.length === 1 && !/[a-z0-9]/.test(key);
+        if (isSymbol) {
+            if (e.ctrlKey || e.metaKey || e.altKey) return false;
+            return pressed === key || pressed.toLowerCase() === key;
+        }
+
+        if (!!e.shiftKey !== (parts.indexOf('shift') >= 0)) return false;
+        if (!!e.ctrlKey !== (parts.indexOf('ctrl') >= 0)) return false;
+        if (!!e.altKey !== (parts.indexOf('alt') >= 0)) return false;
+        if (e.metaKey) return false;
+        return pressed.toLowerCase() === key;
+    }
+
+    // Une action peut être liée à une touche ou à un tableau de touches.
+    function matchAny(e, bindings) {
+        if (Array.isArray(bindings)) return bindings.some(b => matchKey(e, b));
+        return matchKey(e, bindings);
+    }
+
+    function installKeys() {
+        document.addEventListener('keydown', e => {
+            const tag = document.activeElement && document.activeElement.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.metaKey) return;
+
+            // Mode calibrage : les flèches pilotent le placement, pas l'avion.
+            if (S.calMode) {
+                // Touches symboles choisies pour ne rien prendre à GeoFS :
+                // « ² » avance, « , » recule, les parenthèses écartent et
+                // resserrent, les crochets montent et descendent. Les flèches
+                // restent acceptées, elles sont neutralisées dans ce mode.
+                const k = e.key;
+                let handled = true;
+                if (k === '²' || k === '.') calAdjust('f', 0.5);
+                else if (k === ',') calAdjust('f', -0.5);
+                else if (k === ')' || k === 'ArrowRight') calAdjust('span', 0.03);
+                else if (k === '(' || k === 'ArrowLeft') calAdjust('span', -0.03);
+                else if (k === '[' || k === 'ArrowUp') calAdjust('u', 0.25);
+                else if (k === ']' || k === 'ArrowDown') calAdjust('u', -0.25);
+                else if (k === 'Backspace') calReset();
+                else handled = false;
+                if (handled) {
+                    e.preventDefault();
+                    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+                    return;
+                }
+            }
+
+            let action = null;
+            if (matchAny(e, CFG.keys.arm)) action = toggleArm;
+            else if (matchAny(e, CFG.keys.fire)) action = fire;
+            else if (matchAny(e, CFG.keys.type)) action = cycleMissileType;
+            else if (matchAny(e, CFG.keys.bomb)) action = dropBomb;
+            else if (matchAny(e, CFG.keys.target)) action = cycleTarget;
+            else if (matchAny(e, CFG.keys.reload)) action = reload;
+            else if (matchAny(e, CFG.keys.calibrate)) action = toggleCalibration;
+            if (!action) return;
+
+            e.preventDefault();
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+            action();
+        }, true);
+    }
+
+    /* ================================ INIT ============================= */
+
+    function init() {
+        if (S.ready) return;
+        S.ready = true;
+        S.cal = loadCal();
+        buildUI();
+        installKeys();
+        S.lastFrame = performance.now();
+        if (typeof geofs.api.addFrameCallback === 'function') {
+            geofs.api.addFrameCallback(tick);
+        } else {
+            const loop = () => { tick(); window.requestAnimationFrame(loop); };
+            window.requestAnimationFrame(loop);
+        }
+        log('v' + VERSION + ' prêt — ' + keyLabel(CFG.keys.arm) + ' armer / ' +
+            keyLabel(CFG.keys.fire) + ' missile / ' +
+            keyLabel(CFG.keys.type) + ' type / ' +
+            keyLabel(CFG.keys.bomb) + ' bombe / ' +
+            keyLabel(CFG.keys.target) + ' cible / ' +
+            keyLabel(CFG.keys.reload) + ' réarmer / ' +
+            keyLabel(CFG.keys.calibrate) + ' calibrage');
+        toast('Missile & Bomb Mod chargé — ' + CFG.keys.arm.toUpperCase() + ' pour armer', '#39ff88');
+    }
+
+    waitForGeofs(init);
+})();
