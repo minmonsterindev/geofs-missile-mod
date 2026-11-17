@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.15.1
+// @version      1.16.1
 // @updated      2026-11-17
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.15.1';
+    const VERSION = '1.16.1';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -548,7 +548,9 @@
             '.gmm-btn{background:rgba(57,255,136,.1);border:1px solid rgba(57,255,136,.45);color:#9fffc4;',
             'border-radius:4px;padding:3px 9px;font:11px ui-monospace,Consolas,monospace;cursor:pointer}',
             '.gmm-btn:hover{background:rgba(57,255,136,.24)}',
-            '.gmm-btn.small{padding:1px 7px;min-width:22px}'
+            '.gmm-btn.small{padding:1px 7px;min-width:22px}',
+            '.gmm-btn.actif{background:rgba(57,255,136,.42);border-color:#39ff88;color:#04120a;font-weight:700}',
+            '.gmm-panel .choix{display:flex;gap:6px}'
         ].join('');
         document.head.appendChild(style);
 
@@ -575,6 +577,8 @@
             ev.stopPropagation();
             const act = b.getAttribute('data-act');
             if (act === 'bonus') toggleBonus();
+            else if (act === 'modele-geofs') { if (BONUS.on) toggleBonus(); }
+            else if (act === 'modele-lego') { if (!BONUS.on) toggleBonus(); }
             else if (act === 'reset') bonusReset();
             else if (act === 'lat+') bonusAdjust(0, 5);
             else if (act === 'lat-') bonusAdjust(0, -5);
@@ -1652,6 +1656,9 @@
         S.targetId = null;
         S.armed = false;
         updateHUD();
+        // Le modèle choisi est réappliqué à chaque changement d'avion.
+        if (BONUS.on) aircraftGraph(false);
+        else if (BONUS.wanted === 'mig31' && viewer()) toggleBonus();
         if (S.profile) {
             log('Avion détecté : ' + name + ' (' + S.profile.name + ', ' + S.geo.halfSpan.toFixed(1) + ' m de demi-envergure)');
             toast('Emports disponibles — [' + CFG.keys.arm.toUpperCase() + '] pour armer', '#39ff88');
@@ -1705,12 +1712,25 @@
     const BONUS = {
         url: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31-lego.glb',
         entity: null,
-        on: false,
+        on: false,                // le LEGO remplace l'avion
         cal: false,               // mode réglage de la position (Maj+K)
-        home: [28, 0, 0],         // écart par défaut : 28 m sur la gauche
-        offset: [28, 0, 0],       // [gauche, avant, haut] en mètres
-        store: 'gmm_bonus_offset_v2'
+        home: [0, 0, 2.5],        // centré sur l'avion, 2,5 m au-dessus du repère
+        offset: [0, 0, 2.5],      // [gauche, avant, haut] en mètres
+        store: 'gmm_bonus_offset_v3',
+        modelStore: 'gmm_model_v1',
+        wanted: 'geofs'           // modèle mémorisé : 'geofs' ou 'mig31'
     };
+
+    // Le graphe 3D de l'avion GeoFS (racine : body, ailes, train, moteurs…).
+    // Le masquer fait du modèle du mod *le* modèle de l'avion, et non un
+    // doublon posé à côté.
+    function aircraftGraph(show) {
+        const ac = geofs.aircraft.instance;
+        const o = ac && ac.object3d;
+        if (!o) return false;
+        o.visible = !!show;
+        return true;
+    }
 
     function bonusLoad() {
         try {
@@ -1721,10 +1741,19 @@
                 BONUS.offset = v.map(n => (Number(n) || 0));
             }
         } catch (e) { }
+        try {
+            const m = localStorage.getItem(BONUS.modelStore);
+            if (m === 'mig31' || m === 'geofs') BONUS.wanted = m;
+        } catch (e) { }
     }
 
     function bonusSave() {
         try { localStorage.setItem(BONUS.store, JSON.stringify(BONUS.offset)); } catch (e) { }
+    }
+
+    function bonusWanted(id) {
+        BONUS.wanted = id;
+        try { localStorage.setItem(BONUS.modelStore, id); } catch (e) { }
     }
 
     function bonusAdjust(i, d) {
@@ -1777,7 +1806,9 @@
             BONUS.cal = false;
             if (BONUS.entity) { try { v.entities.remove(BONUS.entity); } catch (e) { } }
             BONUS.entity = null;
-            toast('MiG-31 LEGO retiré', '#39ff88');
+            aircraftGraph(true);
+            bonusWanted('geofs');
+            toast('Modèle GeoFS d\'origine', '#39ff88');
             return;
         }
 
@@ -1785,6 +1816,9 @@
             BONUS.entity = v.entities.add({
                 position: new Cesium.CallbackProperty(() => {
                     const fr = currentFrame();
+                    // l'avion change parfois en vol : on ré-affirme le masquage
+                    const ac = geofs.aircraft.instance;
+                    if (ac && ac.object3d && ac.object3d.visible) ac.object3d.visible = false;
                     if (!fr) return Cesium.Cartesian3.fromDegrees(0, 0, 0);
                     return offsetPos(fr, BONUS.offset[0], BONUS.offset[1], BONUS.offset[2]);
                 }, false),
@@ -1792,12 +1826,14 @@
                 model: { uri: BONUS.url, minimumPixelSize: 64, scale: 1.0 }
             });
             BONUS.on = true;
-            const o = BONUS.offset;
-            toast('MiG-31 LEGO — modèle à part, ' + o[0].toFixed(0) + ' m sur la gauche · ' +
-                keyLabel(CFG.keys.bonusCal) + ' régler · bouton Armement pour l\'interface', '#8ef6ff');
+            aircraftGraph(false);
+            bonusWanted('mig31');
+            toast('MiG-31 LEGO — c\'est le modèle de l\'avion · ' +
+                keyLabel(CFG.keys.bonusCal) + ' régler · bouton Armement pour changer', '#8ef6ff');
         } catch (e) {
             warn('avion bonus', e);
             BONUS.on = false;
+            aircraftGraph(true);
             toast('Modèle bonus indisponible', '#ff5a3c');
         }
     }
@@ -1856,10 +1892,11 @@
         h.push('<div class="row"><span>Contacts</span><span class="v">' + S.contacts.length + '</span></div>');
 
         h.push('<div class="sep"></div>');
-        h.push('<h4>MIG-31 LEGO <span class="dim">modèle à part</span></h4>');
-        h.push('<div class="row"><span>Affichage</span><button class="gmm-btn" data-act="bonus">' +
-            (BONUS.on ? 'masquer' : 'afficher') + '</button>' +
-            '<span class="dim">[' + keyLabel(CFG.keys.bonus) + ']</span></div>');
+        h.push('<h4>MODÈLE DE L\'AVION</h4>');
+        h.push('<div class="row"><span>Modèle</span><span class="choix">' +
+            '<button class="gmm-btn' + (BONUS.on ? '' : ' actif') + '" data-act="modele-geofs">GeoFS</button>' +
+            '<button class="gmm-btn' + (BONUS.on ? ' actif' : '') + '" data-act="modele-lego">MiG-31 LEGO</button>' +
+            '</span></div>');
         [['Écart latéral', 0, 'lat', 5], ['Décalage avant', 1, 'fwd', 5], ['Hauteur', 2, 'up', 2]].forEach(a => {
             h.push('<div class="row"><span>' + a[0] + '</span><span class="v">' +
                 (o[a[1]] > 0 ? '+' : '') + o[a[1]].toFixed(1) + ' m</span><span>' +
