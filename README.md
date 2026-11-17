@@ -189,23 +189,31 @@ puisque c'est le missile choisi qui les définit.
 
 ## Avion bonus — MiG-31 Foxhound (LEGO)
 
-Le dépôt contient `assets/mig31-lego.glb` : le MiG-31 du Mecabricks converti en
-glTF léger (843 Ko, 14 232 triangles au lieu de 1,55 M de faces), à l'échelle
-réelle (22,70 m de long, 13,81 m d'envergure).
+C'est un **vrai avion GeoFS**, chargé sur le principe de l'addon
+[Extra Vehicles](https://github.com/af267/GeoFS-Extra-Vehicles) : au lieu d'un
+calque posé sur un autre appareil, le MiG-31 est décrit par un `aircraft.json`
+complet (ailes, moteurs, train, points de collision, caméras) et GeoFS le
+charge comme n'importe quel avion du jeu.
 
-En jeu, la touche **K** masque l'avion GeoFS et affiche ce modèle à la même
-place (il vole et se pilote normalement) ; **K** à nouveau rend le modèle d'origine.
+- `assets/mig31/aircraft.json` — définition : 41 t, 2 × 93 kN, 13,46 m
+d'envergure, 22,70 m de long, `startAltitude` 3,45 m (ventre du modèle) ;
+- `assets/mig31/mig31-lego.glb` — le maillage (14 232 triangles, 843 Ko),
+échelle réelle ;
+- chargement : `parseRecord()` sur l'enregistrement (`definition` = JSON encodé
+en base64), puis `unloadAircraft()` et `init(définition, coordonnées)`,
+exactement la chaîne employée par Extra Vehicles.
 
-**Réglage en jeu** : `Maj+K` active le mode réglage (`²` avance, `,` recule,
-`(` / `)` gauche-droite, `[` / `]` haut-bas, `Maj` = pas de 2 m, `Retour arrière`
-= remise à zéro). Les valeurs sont mémorisées dans le navigateur.
+En jeu, la touche **K** (ou le panneau **Armement → Modèle de l'avion**) bascule
+entre l'appareil courant et le MiG-31 : physique, train, caméra cockpit et
+silhouette propres. L'avion d'origine est mémorisé avant la bascule et restauré
+par le bouton « GeoFS ».
+
+La hauteur ne se règle plus à la main : `startAltitude` place le ventre du
+modèle à 3,45 m, les points de collision du train touchent le sol, et les
+emports du mod se répartissent sur les 8 points sous le ventre.
 
 ## Interface dédiée
 
 Un bouton **Armement** est ajouté dans la barre du bas de GeoFS, entre
-« Location » et « Camera ». Il ouvre un panneau qui résume
-l'état de l'armement et commande le MiG-31 LEGO : afficher/masquer, écart
-latéral, décalage avant, hauteur, et recentrage.
-
-Le MiG-31 LEGO est un **modèle à part** : il vole à côté de votre avion
-(28 m sur la gauche par défaut) au lieu de se superposer à lui.
+« Location » et « Camera ». Il ouvre un panneau qui résume l'état de
+l'armement et permet de changer de modèle d'avion.

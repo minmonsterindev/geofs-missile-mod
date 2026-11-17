@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.17.1
+// @version      1.18.0
 // @updated      2026-11-17
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.17.1';
+    const VERSION = '1.18.0';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -42,8 +42,7 @@
             target: 'u',
             reload: 'd',
             calibrate: 'shift+d',
-            bonus: 'k',
-            bonusCal: 'shift+k'
+            bonus: 'k'
             // Pas de raccourci pour le panneau : « u » sert déjà aux cibles et
             // les autres lettres libres sont rares. Le bouton de la barre suffit.
         },
@@ -581,15 +580,8 @@
             const act = b.getAttribute('data-act');
             if (act === 'bonus') toggleBonus();
             else if (act === 'close') togglePanel(false);
-            else if (act === 'modele-geofs') { if (BONUS.on) toggleBonus(); }
-            else if (act === 'modele-lego') { if (!BONUS.on) toggleBonus(); }
-            else if (act === 'reset') bonusReset();
-            else if (act === 'lat+') bonusAdjust(0, 5);
-            else if (act === 'lat-') bonusAdjust(0, -5);
-            else if (act === 'fwd+') bonusAdjust(1, 5);
-            else if (act === 'fwd-') bonusAdjust(1, -5);
-            else if (act === 'up+') bonusAdjust(2, 2);
-            else if (act === 'up-') bonusAdjust(2, -2);
+            else if (act === 'modele-geofs') bonusRestore();
+            else if (act === 'modele-lego') bonusLoadModel();
             renderPanel();
         });
         document.body.appendChild(panel);
@@ -1604,14 +1596,6 @@
             loadLine = '<span class="dim">—</span>';
         }
 
-        let bonusLine = '';
-        if (BONUS.cal) {
-            const o = BONUS.offset;
-            bonusLine = '<div class="cal">AVION BONUS : lat ' + o[0].toFixed(2) + ' m | avant ' + o[1].toFixed(2) +
-                ' m | haut ' + o[2].toFixed(2) + ' m<br>' +
-                '² avant · , arrière · ( ) gauche/droite · [ ] haut/bas · Maj ×8 · Retour arrière = reset</div>';
-        }
-
         let calLine = '';
         if (S.calMode) {
             const k = calFor();
@@ -1628,7 +1612,6 @@
             'Contacts : <span class="v">' + S.contacts.length + '</span>' +
             ' <span class="dim">(' + Math.round(lockRange() / 1000) + ' km)</span>' +
             calLine +
-            bonusLine +
             '<div class="keys">' +
             '[' + keyLabel(CFG.keys.arm) + '] armer &nbsp; ' +
             '[' + keyLabel(CFG.keys.fire) + '] missile &nbsp; ' +
@@ -1638,7 +1621,6 @@
             '[' + keyLabel(CFG.keys.reload) + '] réarmer &nbsp; ' +
             '[' + keyLabel(CFG.keys.calibrate) + '] calibrage &nbsp; ' +
             '[' + keyLabel(CFG.keys.bonus) + '] LEGO &nbsp; ' +
-            '[' + keyLabel(CFG.keys.bonusCal) + '] régler l\'avion' +
             '</div>';
         if (S.panelOpen) renderPanel();
     }
@@ -1656,15 +1638,13 @@
         S.profile = detectProfile(name);
         S.geo = aircraftGeometry(S.profile || GENERIC_FRAME);
         // la hauteur du modèle LEGO dépend du ventre de CET avion
-        bonusLayout();
         clearStations();
         buildStations(S.profile);
         S.targetId = null;
         S.armed = false;
         updateHUD();
         // Le modèle choisi est réappliqué à chaque changement d'avion.
-        if (BONUS.on) aircraftGraph(false);
-        else if (BONUS.wanted === 'mig31' && viewer()) toggleBonus();
+        if (name !== BONUS.name) { BONUS.active = false; BONUS.saved = null; }
         if (S.profile) {
             log('Avion détecté : ' + name + ' (' + S.profile.name + ', ' + S.geo.halfSpan.toFixed(1) + ' m de demi-envergure)');
             toast('Emports disponibles — [' + CFG.keys.arm.toUpperCase() + '] pour armer', '#39ff88');
@@ -1708,157 +1688,99 @@
     }
 
     /* ==================== AVION BONUS (MiG-31 LEGO) ==================== */
-    // Modèle servi par le dépôt (assets/mig31-lego.glb : 843 Ko, 14 232
-    // triangles, 11 matériaux). Cesium le charge comme un glTF ordinaire ; on
-    // masque le mesh GeoFS et on pose le nôtre sur le même repère, donc
-    // l'avion vole, décollé et se pilote normalement.
-    // Cesium charge un glTF en Y-up puis le convertit en Z-up : dans le repère
-    // local du modèle, X = latéral, Y = -nez, Z = haut. L'orientation ci-dessous
-    // envoie donc X sur la gauche, Y vers l'arrière et Z vers le zénith.
+    // Même principe que l'addon « GeoFS Extra Vehicles » : un avion GeoFS est
+    // décrit par un aircraft.json complet (ailes, moteurs, train, points de
+    // collision, caméras) et se charge avec parseRecord() puis init(). Le glTF
+    // n'est donc plus un calque posé sur un autre avion : c'est le maillage de
+    // l'avion lui-même, avec sa physique.
     const BONUS = {
-        url: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31-lego.glb',
-        entity: null,
-        on: false,                // le LEGO remplace l'avion
-        cal: false,               // mode réglage de la position (Maj+K)
-        adjust: [0, 0, 0],        // réglage utilisateur [gauche, avant, haut]
-        offset: [0, 0, 0],        // position effective, recalculée par bonusLayout()
-        half: 3.45,               // demi-hauteur du MiG-31 LEGO (boîte du glTF)
-        store: 'gmm_bonus_offset_v4',
-        modelStore: 'gmm_model_v1',
-        wanted: 'geofs'           // modèle mémorisé : 'geofs' ou 'mig31'
+        base: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31/',
+        id: 9917,
+        name: 'MiG-31 Foxhound (LEGO)',
+        active: false,
+        loading: false,
+        saved: null              // avion d'origine, pour pouvoir revenir
     };
 
-    // Le graphe 3D de l'avion GeoFS (racine : body, ailes, train, moteurs…).
-    // Le masquer fait du modèle du mod *le* modèle de l'avion, et non un
-    // doublon posé à côté.
-    function aircraftGraph(show) {
-        const ac = geofs.aircraft.instance;
-        const o = ac && ac.object3d;
-        if (!o) return false;
-        o.visible = !!show;
-        return true;
+    function bonusCoords() {
+        try { return geofs.aircraft.instance.getCurrentCoordinates(); } catch (e) { return undefined; }
     }
 
-    // Le repère GeoFS n'est pas au sol : sur un XB-70 il est 4,4 m au-dessus.
-    // On pose donc le ventre du LEGO sur le ventre de l'avion (points de
-    // collision du modèle GeoFS), ce qui revient à poser les roues au sol.
-    function bonusLayout() {
-        const belly = (S.geo && typeof S.geo.belly === 'number') ? S.geo.belly : -2.5;
-        // +0,25 m : les points de collision sont à l'intérieur du maillage, sans
-        // cette marge les roues du LEGO s'enfoncent d'une vingtaine de cm.
-        BONUS.offset = [
-            BONUS.adjust[0],
-            BONUS.adjust[1],
-            Math.round((belly + BONUS.half + 0.25 + BONUS.adjust[2]) * 100) / 100
-        ];
-    }
-
-    function bonusLoad() {
-        try {
-            const raw = localStorage.getItem(BONUS.store);
-            if (raw) {
-                const v = JSON.parse(raw);
-                if (Array.isArray(v) && v.length === 3) BONUS.adjust = v.map(n => (Number(n) || 0));
-            }
-        } catch (e) { }
-        bonusLayout();
-        try {
-            const m = localStorage.getItem(BONUS.modelStore);
-            if (m === 'mig31' || m === 'geofs') BONUS.wanted = m;
-        } catch (e) { }
-    }
-
-    function bonusSave() {
-        try { localStorage.setItem(BONUS.store, JSON.stringify(BONUS.adjust)); } catch (e) { }
-    }
-
-    function bonusWanted(id) {
-        BONUS.wanted = id;
-        try { localStorage.setItem(BONUS.modelStore, id); } catch (e) { }
-    }
-
-    function bonusAdjust(i, d) {
-        BONUS.adjust[i] = Math.round((BONUS.adjust[i] + d) * 100) / 100;
-        bonusSave();
-        bonusLayout();
-        updateHUD();
-    }
-
-    function bonusReset() {
-        BONUS.adjust = [0, 0, 0];
-        bonusSave();
-        bonusLayout();
-        updateHUD();
-        toast('Modèle recalé sur le ventre de l\'avion', '#8ef6ff');
-    }
-
-    function toggleBonusCal() {
-        if (!BONUS.on) {
-            toast('Affiche d\'abord l\'avion bonus avec ' + keyLabel(CFG.keys.bonus), '#ffce54');
+    function bonusLoadModel() {
+        if (BONUS.loading || BONUS.active) return;
+        const inst = geofs.aircraft.instance;
+        if (!inst || typeof inst.parseRecord !== 'function') {
+            toast('GeoFS pas encore prêt', '#ffce54');
             return;
         }
-        BONUS.cal = !BONUS.cal;
-        toast(BONUS.cal
-            ? 'RÉGLAGE AVION — ² avant · , arrière · ( ) gauche/droite · [ ] haut/bas · Maj ×8 · Retour arrière = reset'
-            : 'Réglage avion terminé (sauvegardé)', BONUS.cal ? '#8ef6ff' : '#39ff88');
+        BONUS.loading = true;
         updateHUD();
+        toast('Chargement du MiG-31 LEGO…', '#8ef6ff');
+
+        fetch(BONUS.base + 'aircraft.json', { cache: 'no-store' })
+            .then(r => {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.text();
+            })
+            .then(txt => {
+                const rec = {
+                    id: BONUS.id,
+                    name: BONUS.name,
+                    fullPath: BONUS.base,
+                    isPremium: false,
+                    isCommunity: false,
+                    definition: btoa(unescape(encodeURIComponent(txt))),
+                    multiplayerFiles: []
+                };
+                const parsed = inst.parseRecord(JSON.stringify(rec));
+                if (!parsed) throw new Error('définition refusée');
+                if (!BONUS.saved) {
+                    BONUS.saved = {
+                        definition: inst.definition,
+                        record: inst.aircraftRecord,
+                        fullPath: inst.fullPath
+                    };
+                }
+                const coords = bonusCoords();
+                inst.unloadAircraft();
+                inst.fullPath = rec.fullPath;
+                inst.aircraftRecord = rec;
+                inst.init(parsed, coords);
+                BONUS.active = true;
+                BONUS.loading = false;
+                updateHUD();
+                toast('MiG-31 LEGO — avion complet chargé', '#39ff88');
+                log('Avion bonus : ' + BONUS.name + ' depuis ' + BONUS.base);
+            })
+            .catch(e => {
+                BONUS.loading = false;
+                updateHUD();
+                warn('avion bonus', e);
+                toast('Modèle indisponible : ' + (e && e.message ? e.message : e), '#ff5a3c');
+            });
     }
 
-    function bonusQuat() {
-        const Cesium = C();
-        const fr = currentFrame();
-        if (!fr) return Cesium.Quaternion.IDENTITY;
+    function bonusRestore() {
+        if (!BONUS.active || !BONUS.saved) return;
+        const inst = geofs.aircraft.instance;
+        const coords = bonusCoords();
         try {
-            // colonnes : gauche, arrière, haut (repère direct)
-            const back = Cesium.Cartesian3.negate(fr.F, new Cesium.Cartesian3());
-            const m = Cesium.Matrix3.fromColumnMajorArray(
-                [fr.R.x, fr.R.y, fr.R.z, back.x, back.y, back.z, fr.U.x, fr.U.y, fr.U.z],
-                new Cesium.Matrix3()
-            );
-            return Cesium.Quaternion.fromRotationMatrix(m, new Cesium.Quaternion());
-        } catch (e) { return quatFromZ(fr.F); }
+            inst.unloadAircraft();
+            inst.fullPath = BONUS.saved.fullPath;
+            inst.aircraftRecord = BONUS.saved.record;
+            inst.init(BONUS.saved.definition, coords);
+            BONUS.active = false;
+            updateHUD();
+            toast('Avion GeoFS d\'origine', '#39ff88');
+        } catch (e) {
+            warn('retour avion', e);
+            toast('Impossible de restaurer l\'avion', '#ff5a3c');
+        }
     }
 
     function toggleBonus() {
-        const Cesium = C();
-        const v = viewer();
-        if (!v || !Cesium) return;
-
-        if (BONUS.on) {
-            BONUS.on = false;
-            BONUS.cal = false;
-            if (BONUS.entity) { try { v.entities.remove(BONUS.entity); } catch (e) { } }
-            BONUS.entity = null;
-            aircraftGraph(true);
-            bonusWanted('geofs');
-            toast('Modèle GeoFS d\'origine', '#39ff88');
-            return;
-        }
-
-        try {
-            BONUS.entity = v.entities.add({
-                position: new Cesium.CallbackProperty(() => {
-                    const fr = currentFrame();
-                    // l'avion change parfois en vol : on ré-affirme le masquage
-                    const ac = geofs.aircraft.instance;
-                    if (ac && ac.object3d && ac.object3d.visible) ac.object3d.visible = false;
-                    if (!fr) return Cesium.Cartesian3.fromDegrees(0, 0, 0);
-                    return offsetPos(fr, BONUS.offset[0], BONUS.offset[1], BONUS.offset[2]);
-                }, false),
-                orientation: new Cesium.CallbackProperty(bonusQuat, false),
-                model: { uri: BONUS.url, minimumPixelSize: 64, scale: 1.0 }
-            });
-            BONUS.on = true;
-            aircraftGraph(false);
-            bonusWanted('mig31');
-            toast('MiG-31 LEGO — c\'est le modèle de l\'avion · ' +
-                keyLabel(CFG.keys.bonusCal) + ' régler · bouton Armement pour changer', '#8ef6ff');
-        } catch (e) {
-            warn('avion bonus', e);
-            BONUS.on = false;
-            aircraftGraph(true);
-            toast('Modèle bonus indisponible', '#ff5a3c');
-        }
+        if (BONUS.active) bonusRestore();
+        else bonusLoadModel();
     }
 
     /* ===================== INTERFACE DÉDIÉE (PANNEAU) ================== */
@@ -1896,7 +1818,6 @@
         const ac = geofs.aircraft.instance;
         const name = S.profile ? S.profile.name : (aircraftName(ac) || 'inconnu');
         const c = S.targetId ? findContact(S.targetId) : null;
-        const o = BONUS.offset;
         const h = [];
 
         h.push('<button class="gmm-x" data-act="close" title="Fermer">✕</button>');
@@ -1918,27 +1839,19 @@
         h.push('<div class="sep"></div>');
         h.push('<h4>MODÈLE DE L\'AVION</h4>');
         h.push('<div class="row"><span>Modèle</span><span class="choix">' +
-            '<button class="gmm-btn' + (BONUS.on ? '' : ' actif') + '" data-act="modele-geofs">GeoFS</button>' +
-            '<button class="gmm-btn' + (BONUS.on ? ' actif' : '') + '" data-act="modele-lego">MiG-31 LEGO</button>' +
+            '<button class="gmm-btn' + (BONUS.active ? '' : ' actif') + '" data-act="modele-geofs">GeoFS</button>' +
+            '<button class="gmm-btn' + (BONUS.active ? ' actif' : '') + '" data-act="modele-lego">MiG-31 LEGO</button>' +
             '</span></div>');
-        [['Écart latéral', 0, 'lat', 5], ['Décalage avant', 1, 'fwd', 5], ['Hauteur', 2, 'up', 2]].forEach(a => {
-            h.push('<div class="row"><span>' + a[0] + '</span><span class="v">' +
-                (o[a[1]] > 0 ? '+' : '') + o[a[1]].toFixed(1) + ' m</span><span>' +
-                '<button class="gmm-btn small" data-act="' + a[2] + '-">−</button> ' +
-                '<button class="gmm-btn small" data-act="' + a[2] + '+">+</button></span></div>');
-        });
-        h.push('<div class="row"><span class="dim">' + a0Label() + '</span>' +
-            '<button class="gmm-btn" data-act="reset">Recentrer</button></div>');
+        h.push('<div class="row"><span class="dim">' +
+            (BONUS.loading ? 'chargement de l\'aircraft.json…'
+                : (BONUS.active ? 'avion complet · physique et train dédiés'
+                    : 'avion d\'origine')) + '</span></div>');
 
         h.push('<div class="sep"></div>');
         h.push('<div class="dim">' + keyLabel(CFG.keys.arm) + ' armer · ' + keyLabel(CFG.keys.fire) + ' tirer · ' +
             keyLabel(CFG.keys.type) + ' type · ' + keyLabel(CFG.keys.bomb[0]) + ' bombe · ' +
             keyLabel(CFG.keys.reload) + ' réarmer</div>');
         S.ui.panel.innerHTML = h.join('');
-    }
-
-    function a0Label() {
-        return 'réglage fin : ' + keyLabel(CFG.keys.bonusCal);
     }
 
     /* ============================== TOUCHES ============================ */
@@ -2013,27 +1926,6 @@
             const tag = document.activeElement && document.activeElement.tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.metaKey) return;
 
-            // Mode réglage de l'avion bonus : mêmes touches symboles, mais
-            // elles déplacent le modèle par rapport au repère de l'avion.
-            if (BONUS.cal) {
-                const b = e.key;
-                const step = e.shiftKey ? 2 : 0.25;
-                let deplace = true;
-                if (b === '²' || b === '.') bonusAdjust(1, step);
-                else if (b === ',') bonusAdjust(1, -step);
-                else if (b === '(') bonusAdjust(0, step);
-                else if (b === ')') bonusAdjust(0, -step);
-                else if (b === '[') bonusAdjust(2, step);
-                else if (b === ']') bonusAdjust(2, -step);
-                else if (b === 'Backspace') bonusReset();
-                else deplace = false;
-                if (deplace) {
-                    e.preventDefault();
-                    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-                    return;
-                }
-            }
-
             // Mode calibrage : les flèches pilotent le placement, pas l'avion.
             if (S.calMode) {
                 // Touches symboles choisies pour ne rien prendre à GeoFS :
@@ -2065,7 +1957,6 @@
             else if (matchAny(e, CFG.keys.target)) action = cycleTarget;
             else if (matchAny(e, CFG.keys.reload)) action = reload;
             else if (matchAny(e, CFG.keys.calibrate)) action = toggleCalibration;
-            else if (matchAny(e, CFG.keys.bonusCal)) action = toggleBonusCal;
             else if (matchAny(e, CFG.keys.bonus)) action = toggleBonus;
             if (!action) return;
 
@@ -2081,7 +1972,6 @@
         if (S.ready) return;
         S.ready = true;
         S.cal = loadCal();
-        bonusLoad();
         buildUI();
         installKeys();
         // La barre du bas de GeoFS arrive parfois après le script : on réessaie.
