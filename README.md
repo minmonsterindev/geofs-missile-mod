@@ -203,7 +203,7 @@ place (il vole et se pilote normalement) ; **K** à nouveau rend le modèle d'or
 ## Interface dédiée
 
 Un bouton **Armement** est ajouté dans la barre du bas de GeoFS, entre
-« Location » et « Camera » (ou touche `U`). Il ouvre un panneau qui résume
+« Location » et « Camera ». Il ouvre un panneau qui résume
 l'état de l'armement et commande le MiG-31 LEGO : afficher/masquer, écart
 latéral, décalage avant, hauteur, et recentrage.
 
