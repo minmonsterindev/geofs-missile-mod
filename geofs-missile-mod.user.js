@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.15.0
+// @version      1.15.1
 // @updated      2026-11-17
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.15.0';
+    const VERSION = '1.15.1';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -43,8 +43,9 @@
             reload: 'd',
             calibrate: 'shift+d',
             bonus: 'k',
-            bonusCal: 'shift+k',
-            panel: 'u'
+            bonusCal: 'shift+k'
+            // Pas de raccourci pour le panneau : « u » sert déjà aux cibles et
+            // les autres lettres libres sont rares. Le bouton de la barre suffit.
         },
 
         // Vol du missile : les performances propres à chaque missile sont dans
@@ -533,7 +534,8 @@
             'font:12px ui-monospace,Consolas,monospace;transition:opacity .45s,transform .45s}',
             '.gmm-toast.out{opacity:0;transform:translateY(-8px)}',
             '.gmm-panel{position:fixed;left:12px;bottom:98px;z-index:9998;display:none;width:308px;',
-            'background:rgba(4,14,8,.92);border:1px solid rgba(57,255,136,.35);border-radius:8px;',
+            'background:rgba(3,10,6,.97);border:1px solid rgba(57,255,136,.45);border-radius:8px;',
+            '-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);',
             'padding:10px 12px;color:#9fffc4;font:12px/1.5 ui-monospace,Consolas,monospace;',
             'box-shadow:0 6px 26px rgba(0,0,0,.55)}',
             '.gmm-panel.open{display:block}',
@@ -1628,8 +1630,7 @@
             '[' + keyLabel(CFG.keys.reload) + '] réarmer &nbsp; ' +
             '[' + keyLabel(CFG.keys.calibrate) + '] calibrage &nbsp; ' +
             '[' + keyLabel(CFG.keys.bonus) + '] LEGO &nbsp; ' +
-            '[' + keyLabel(CFG.keys.bonusCal) + '] régler l\'avion &nbsp; ' +
-            '[' + keyLabel(CFG.keys.panel) + '] panneau' +
+            '[' + keyLabel(CFG.keys.bonusCal) + '] régler l\'avion' +
             '</div>';
         if (S.panelOpen) renderPanel();
     }
@@ -1793,7 +1794,7 @@
             BONUS.on = true;
             const o = BONUS.offset;
             toast('MiG-31 LEGO — modèle à part, ' + o[0].toFixed(0) + ' m sur la gauche · ' +
-                keyLabel(CFG.keys.bonusCal) + ' régler · ' + keyLabel(CFG.keys.panel) + ' interface', '#8ef6ff');
+                keyLabel(CFG.keys.bonusCal) + ' régler · bouton Armement pour l\'interface', '#8ef6ff');
         } catch (e) {
             warn('avion bonus', e);
             BONUS.on = false;
@@ -1813,7 +1814,7 @@
         btn.id = 'gmm-panel-btn';
         btn.className = 'mdl-button mdl-js-button geofs-f-standard-ui';
         btn.textContent = 'Armement';
-        btn.title = 'Interface du mod missiles (' + keyLabel(CFG.keys.panel) + ')';
+        btn.title = 'Interface du mod missiles';
         btn.addEventListener('click', ev => {
             ev.preventDefault();
             ev.stopPropagation();
@@ -1870,8 +1871,8 @@
 
         h.push('<div class="sep"></div>');
         h.push('<div class="dim">' + keyLabel(CFG.keys.arm) + ' armer · ' + keyLabel(CFG.keys.fire) + ' tirer · ' +
-            keyLabel(CFG.keys.type) + ' type · ' + keyLabel(CFG.keys.bomb) + ' bombe · ' +
-            keyLabel(CFG.keys.reload) + ' réarmer · ' + keyLabel(CFG.keys.panel) + ' ce panneau</div>');
+            keyLabel(CFG.keys.type) + ' type · ' + keyLabel(CFG.keys.bomb[0]) + ' bombe · ' +
+            keyLabel(CFG.keys.reload) + ' réarmer</div>');
         S.ui.panel.innerHTML = h.join('');
     }
 
@@ -2003,7 +2004,6 @@
             else if (matchAny(e, CFG.keys.target)) action = cycleTarget;
             else if (matchAny(e, CFG.keys.reload)) action = reload;
             else if (matchAny(e, CFG.keys.calibrate)) action = toggleCalibration;
-            else if (matchAny(e, CFG.keys.panel)) action = togglePanel;
             else if (matchAny(e, CFG.keys.bonusCal)) action = toggleBonusCal;
             else if (matchAny(e, CFG.keys.bonus)) action = toggleBonus;
             if (!action) return;
