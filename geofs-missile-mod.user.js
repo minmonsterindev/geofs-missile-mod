@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.16.2
+// @version      1.17.0
 // @updated      2026-11-17
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.16.2';
+    const VERSION = '1.17.0';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1655,6 +1655,8 @@
 
         S.profile = detectProfile(name);
         S.geo = aircraftGeometry(S.profile || GENERIC_FRAME);
+        // la hauteur du modèle LEGO dépend du ventre de CET avion
+        bonusLayout();
         clearStations();
         buildStations(S.profile);
         S.targetId = null;
@@ -1718,9 +1720,10 @@
         entity: null,
         on: false,                // le LEGO remplace l'avion
         cal: false,               // mode réglage de la position (Maj+K)
-        home: [0, 0, 2.5],        // centré sur l'avion, 2,5 m au-dessus du repère
-        offset: [0, 0, 2.5],      // [gauche, avant, haut] en mètres
-        store: 'gmm_bonus_offset_v3',
+        adjust: [0, 0, 0],        // réglage utilisateur [gauche, avant, haut]
+        offset: [0, 0, 0],        // position effective, recalculée par bonusLayout()
+        half: 3.45,               // demi-hauteur du MiG-31 LEGO (boîte du glTF)
+        store: 'gmm_bonus_offset_v4',
         modelStore: 'gmm_model_v1',
         wanted: 'geofs'           // modèle mémorisé : 'geofs' ou 'mig31'
     };
@@ -1736,15 +1739,27 @@
         return true;
     }
 
+    // Le repère GeoFS n'est pas au sol : sur un XB-70 il est 4,4 m au-dessus.
+    // On pose donc le ventre du LEGO sur le ventre de l'avion (points de
+    // collision du modèle GeoFS), ce qui revient à poser les roues au sol.
+    function bonusLayout() {
+        const belly = (S.geo && typeof S.geo.belly === 'number') ? S.geo.belly : -2.5;
+        BONUS.offset = [
+            BONUS.adjust[0],
+            BONUS.adjust[1],
+            Math.round((belly + BONUS.half + BONUS.adjust[2]) * 100) / 100
+        ];
+    }
+
     function bonusLoad() {
         try {
             const raw = localStorage.getItem(BONUS.store);
-            if (!raw) return;
-            const v = JSON.parse(raw);
-            if (Array.isArray(v) && v.length === 3) {
-                BONUS.offset = v.map(n => (Number(n) || 0));
+            if (raw) {
+                const v = JSON.parse(raw);
+                if (Array.isArray(v) && v.length === 3) BONUS.adjust = v.map(n => (Number(n) || 0));
             }
         } catch (e) { }
+        bonusLayout();
         try {
             const m = localStorage.getItem(BONUS.modelStore);
             if (m === 'mig31' || m === 'geofs') BONUS.wanted = m;
@@ -1752,7 +1767,7 @@
     }
 
     function bonusSave() {
-        try { localStorage.setItem(BONUS.store, JSON.stringify(BONUS.offset)); } catch (e) { }
+        try { localStorage.setItem(BONUS.store, JSON.stringify(BONUS.adjust)); } catch (e) { }
     }
 
     function bonusWanted(id) {
@@ -1761,16 +1776,18 @@
     }
 
     function bonusAdjust(i, d) {
-        BONUS.offset[i] = Math.round((BONUS.offset[i] + d) * 100) / 100;
+        BONUS.adjust[i] = Math.round((BONUS.adjust[i] + d) * 100) / 100;
         bonusSave();
+        bonusLayout();
         updateHUD();
     }
 
     function bonusReset() {
-        BONUS.offset = BONUS.home.slice();
+        BONUS.adjust = [0, 0, 0];
         bonusSave();
+        bonusLayout();
         updateHUD();
-        toast('Position de l\'avion bonus remise à zéro', '#8ef6ff');
+        toast('Modèle recalé sur le ventre de l\'avion', '#8ef6ff');
     }
 
     function toggleBonusCal() {
