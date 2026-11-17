@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.13.0
+// @version      1.14.0
 // @updated      2026-11-17
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.13.0';
+    const VERSION = '1.14.0';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -42,7 +42,8 @@
             target: 'u',
             reload: 'd',
             calibrate: 'shift+d',
-            bonus: 'k'
+            bonus: 'k',
+            bonusCal: 'shift+k'
         },
 
         // Vol du missile : les performances propres à chaque missile sont dans
@@ -1555,6 +1556,14 @@
             loadLine = '<span class="dim">—</span>';
         }
 
+        let bonusLine = '';
+        if (BONUS.cal) {
+            const o = BONUS.offset;
+            bonusLine = '<div class="cal">AVION BONUS : lat ' + o[0].toFixed(2) + ' m | avant ' + o[1].toFixed(2) +
+                ' m | haut ' + o[2].toFixed(2) + ' m<br>' +
+                '² avant · , arrière · ( ) gauche/droite · [ ] haut/bas · Maj ×8 · Retour arrière = reset</div>';
+        }
+
         let calLine = '';
         if (S.calMode) {
             const k = calFor();
@@ -1571,6 +1580,7 @@
             'Contacts : <span class="v">' + S.contacts.length + '</span>' +
             ' <span class="dim">(' + Math.round(lockRange() / 1000) + ' km)</span>' +
             calLine +
+            bonusLine +
             '<div class="keys">' +
             '[' + keyLabel(CFG.keys.arm) + '] armer &nbsp; ' +
             '[' + keyLabel(CFG.keys.fire) + '] missile &nbsp; ' +
@@ -1579,7 +1589,8 @@
             '[' + keyLabel(CFG.keys.bomb) + '] bombe<br>' +
             '[' + keyLabel(CFG.keys.reload) + '] réarmer &nbsp; ' +
             '[' + keyLabel(CFG.keys.calibrate) + '] calibrage &nbsp; ' +
-            '[' + keyLabel(CFG.keys.bonus) + '] LEGO' +
+            '[' + keyLabel(CFG.keys.bonus) + '] LEGO &nbsp; ' +
+            '[' + keyLabel(CFG.keys.bonusCal) + '] régler l\'avion' +
             '</div>';
     }
 
@@ -1647,21 +1658,67 @@
     // triangles, 11 matériaux). Cesium le charge comme un glTF ordinaire ; on
     // masque le mesh GeoFS et on pose le nôtre sur le même repère, donc
     // l'avion vole, décollé et se pilote normalement.
-    // Repère du modèle : X = gauche, Y = avant, Z = haut (comme les emports).
+    // Cesium charge un glTF en Y-up puis le convertit en Z-up : dans le repère
+    // local du modèle, X = latéral, Y = -nez, Z = haut. L'orientation ci-dessous
+    // envoie donc X sur la gauche, Y vers l'arrière et Z vers le zénith.
     const BONUS = {
         url: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31-lego.glb',
         entity: null,
         on: false,
-        offset: [0, 0, 0]      // [gauche, avant, haut] en mètres, si besoin d'ajuster
+        cal: false,            // mode réglage de la position (Maj+K)
+        offset: [0, 0, 0],     // [gauche, avant, haut] en mètres
+        store: 'gmm_bonus_offset_v1'
     };
+
+    function bonusLoad() {
+        try {
+            const raw = localStorage.getItem(BONUS.store);
+            if (!raw) return;
+            const v = JSON.parse(raw);
+            if (Array.isArray(v) && v.length === 3) {
+                BONUS.offset = v.map(n => (Number(n) || 0));
+            }
+        } catch (e) { }
+    }
+
+    function bonusSave() {
+        try { localStorage.setItem(BONUS.store, JSON.stringify(BONUS.offset)); } catch (e) { }
+    }
+
+    function bonusAdjust(i, d) {
+        BONUS.offset[i] = Math.round((BONUS.offset[i] + d) * 100) / 100;
+        bonusSave();
+        updateHUD();
+    }
+
+    function bonusReset() {
+        BONUS.offset = [0, 0, 0];
+        bonusSave();
+        updateHUD();
+        toast('Position de l\'avion bonus remise à zéro', '#8ef6ff');
+    }
+
+    function toggleBonusCal() {
+        if (!BONUS.on) {
+            toast('Affiche d\'abord l\'avion bonus avec ' + keyLabel(CFG.keys.bonus), '#ffce54');
+            return;
+        }
+        BONUS.cal = !BONUS.cal;
+        toast(BONUS.cal
+            ? 'RÉGLAGE AVION — ² avant · , arrière · ( ) gauche/droite · [ ] haut/bas · Maj ×8 · Retour arrière = reset'
+            : 'Réglage avion terminé (sauvegardé)', BONUS.cal ? '#8ef6ff' : '#39ff88');
+        updateHUD();
+    }
 
     function bonusQuat() {
         const Cesium = C();
         const fr = currentFrame();
         if (!fr) return Cesium.Quaternion.IDENTITY;
         try {
+            // colonnes : gauche, arrière, haut (repère direct)
+            const back = Cesium.Cartesian3.negate(fr.F, new Cesium.Cartesian3());
             const m = Cesium.Matrix3.fromColumnMajorArray(
-                [fr.R.x, fr.R.y, fr.R.z, fr.U.x, fr.U.y, fr.U.z, fr.F.x, fr.F.y, fr.F.z],
+                [fr.R.x, fr.R.y, fr.R.z, back.x, back.y, back.z, fr.U.x, fr.U.y, fr.U.z],
                 new Cesium.Matrix3()
             );
             return Cesium.Quaternion.fromRotationMatrix(m, new Cesium.Quaternion());
@@ -1677,6 +1734,7 @@
 
         if (BONUS.on) {
             BONUS.on = false;
+            BONUS.cal = false;
             if (BONUS.entity) { try { v.entities.remove(BONUS.entity); } catch (e) { } }
             BONUS.entity = null;
             try { if (mesh) mesh.show = true; } catch (e) { }
@@ -1696,7 +1754,7 @@
             });
             try { if (mesh) mesh.show = false; } catch (e) { }
             BONUS.on = true;
-            toast('MiG-31 LEGO — ' + keyLabel(CFG.keys.bonus) + ' pour revenir au modèle GeoFS', '#8ef6ff');
+            toast('MiG-31 LEGO — ' + keyLabel(CFG.keys.bonus) + ' revenir · ' + keyLabel(CFG.keys.bonusCal) + ' régler la position', '#8ef6ff');
         } catch (e) {
             warn('avion bonus', e);
             try { if (mesh) mesh.show = true; } catch (err) { }
@@ -1777,6 +1835,27 @@
             const tag = document.activeElement && document.activeElement.tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.metaKey) return;
 
+            // Mode réglage de l'avion bonus : mêmes touches symboles, mais
+            // elles déplacent le modèle par rapport au repère de l'avion.
+            if (BONUS.cal) {
+                const b = e.key;
+                const step = e.shiftKey ? 2 : 0.25;
+                let deplace = true;
+                if (b === '²' || b === '.') bonusAdjust(1, step);
+                else if (b === ',') bonusAdjust(1, -step);
+                else if (b === '(') bonusAdjust(0, step);
+                else if (b === ')') bonusAdjust(0, -step);
+                else if (b === '[') bonusAdjust(2, step);
+                else if (b === ']') bonusAdjust(2, -step);
+                else if (b === 'Backspace') bonusReset();
+                else deplace = false;
+                if (deplace) {
+                    e.preventDefault();
+                    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+                    return;
+                }
+            }
+
             // Mode calibrage : les flèches pilotent le placement, pas l'avion.
             if (S.calMode) {
                 // Touches symboles choisies pour ne rien prendre à GeoFS :
@@ -1808,6 +1887,7 @@
             else if (matchAny(e, CFG.keys.target)) action = cycleTarget;
             else if (matchAny(e, CFG.keys.reload)) action = reload;
             else if (matchAny(e, CFG.keys.calibrate)) action = toggleCalibration;
+            else if (matchAny(e, CFG.keys.bonusCal)) action = toggleBonusCal;
             else if (matchAny(e, CFG.keys.bonus)) action = toggleBonus;
             if (!action) return;
 
@@ -1823,6 +1903,7 @@
         if (S.ready) return;
         S.ready = true;
         S.cal = loadCal();
+        bonusLoad();
         buildUI();
         installKeys();
         S.lastFrame = performance.now();

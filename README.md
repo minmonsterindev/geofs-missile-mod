@@ -195,3 +195,7 @@ réelle (22,70 m de long, 13,81 m d'envergure).
 
 En jeu, la touche **K** masque l'avion GeoFS et affiche ce modèle à la même
 place (il vole et se pilote normalement) ; **K** à nouveau rend le modèle d'origine.
+
+**Réglage en jeu** : `Maj+K` active le mode réglage (`²` avance, `,` recule,
+`(` / `)` gauche-droite, `[` / `]` haut-bas, `Maj` = pas de 2 m, `Retour arrière`
+= remise à zéro). Les valeurs sont mémorisées dans le navigateur.
