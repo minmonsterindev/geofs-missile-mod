@@ -1,0 +1,209 @@
+[
+    {
+        "mass": 41000,
+        "tensorFactor": 0.05,
+        "dragFactor": 0.28,
+        "com": [0, 0.2, 0],
+        "gearTravelTime": 4,
+        "flapsTravelTime": 1,
+        "flapsSteps": 2,
+        "airbrakesTravelTime": 0.5,
+        "zeroThrustAltitude": 20000,
+        "minRPM": 800,
+        "maxRPM": 10000,
+        "driveRatio": 0.25,
+        "engineInertia": 1,
+        "startupTime": 6,
+        "startAltitude": 3.45,
+        "startTilt": 0.5,
+        "minimumSpeed": 210,
+        "autopilot": true,
+        "motionSensitivity": 0.5,
+        "instruments": {
+            "cdi": { "animations": [{ "value": "view", "type": "show", "notEq": "cockpit" }] },
+            "compass": { "animations": [{ "value": "view", "type": "show", "notEq": "cockpit" }] },
+            "airspeedJet": { "animations": [{ "value": "view", "type": "show", "notEq": "cockpit" }] },
+            "attitudeJet": { "animations": [{ "value": "view", "type": "show", "notEq": "cockpit" }] },
+            "altitude": { "animations": [{ "value": "view", "type": "show", "notEq": "cockpit" }] },
+            "varioJet": { "animations": [{ "value": "view", "type": "show", "notEq": "cockpit" }] },
+            "rpmJet": { "animations": [{ "value": "view", "type": "show", "notEq": "cockpit" }] },
+            "spoilers": "",
+            "brakes": "",
+            "gear": "",
+            "flaps": ""
+        },
+        "parts": [
+            {
+                "name": "body",
+                "type": "airfoil",
+                "model": "mig31-lego.glb",
+                "position": [0, 0, 0],
+                "rotation": [0, 0, 180],
+                "liftFactor": 25,
+                "dragFactor": 0.2,
+                "forceDirection": "X",
+                "points": { "forceSourcePoint": [0, 0, 0] },
+                "collisionPoints": [
+                    [0, 9.5, -3.0],
+                    [0, 0, -3.45],
+                    [0, -9.5, -3.0],
+                    [3.2, 0, -3.3],
+                    [-3.2, 0, -3.3],
+                    [0, 10.5, 0.6],
+                    [0, -11, 0.8]
+                ]
+            },
+            {
+                "name": "leftWing",
+                "type": "airfoil",
+                "position": null,
+                "area": 30,
+                "forceDirection": "Z",
+                "points": { "forceSourcePoint": [-4.2, 0, 0.2] },
+                "rotation": [-0.4, 0, 0],
+                "stalls": true
+            },
+            {
+                "name": "rightWing",
+                "type": "airfoil",
+                "position": null,
+                "area": 30,
+                "forceDirection": "Z",
+                "points": { "forceSourcePoint": [4.2, 0, 0.2] },
+                "rotation": [-0.4, 0, 0],
+                "stalls": true
+            },
+            {
+                "name": "verticalStab",
+                "type": "airfoil",
+                "position": null,
+                "liftFactor": 10,
+                "dragFactor": 2,
+                "forceDirection": "X",
+                "points": { "forceSourcePoint": [0, -9.5, 1.6] },
+                "stalls": true
+            },
+            {
+                "name": "leftAileron",
+                "type": "airfoil",
+                "position": [-3.6, -1.6, 0],
+                "liftFactor": 15,
+                "dragFactor": 0.2,
+                "forceDirection": "Z",
+                "points": { "forceSourcePoint": [0, 0, 0] },
+                "animations": [{ "type": "rotate", "axis": "X", "value": "roll", "ratio": -30 }],
+                "rotation": [0, -8, 0]
+            },
+            {
+                "name": "rightAileron",
+                "type": "airfoil",
+                "position": [3.6, -1.6, 0],
+                "liftFactor": 15,
+                "dragFactor": 0.2,
+                "forceDirection": "Z",
+                "points": { "forceSourcePoint": [0, 0, 0] },
+                "animations": [{ "type": "rotate", "axis": "X", "value": "roll", "ratio": 30 }],
+                "rotation": [0, 8, 0]
+            },
+            {
+                "name": "leftFlap",
+                "type": "airfoil",
+                "position": [-2.4, -2.4, -0.1],
+                "liftFactor": 9,
+                "dragFactor": 1,
+                "forceDirection": "Z",
+                "points": { "forceSourcePoint": [0, 1, 0] },
+                "animations": [{ "type": "rotate", "axis": "X", "value": "flapsPosition", "ratio": -15 }]
+            },
+            {
+                "name": "rightFlap",
+                "type": "airfoil",
+                "position": [2.4, -2.4, -0.1],
+                "liftFactor": 9,
+                "dragFactor": 1,
+                "forceDirection": "Z",
+                "points": { "forceSourcePoint": [0, 1, 0] },
+                "animations": [{ "type": "rotate", "axis": "X", "value": "flapsPosition", "ratio": -15 }]
+            },
+            {
+                "name": "elevator",
+                "type": "airfoil",
+                "position": [0, -9.4, 0],
+                "liftFactor": 10,
+                "dragFactor": 0.2,
+                "forceDirection": "Z",
+                "points": { "forceSourcePoint": [0, -0.5, 0] },
+                "animations": [{ "type": "rotate", "axis": "X", "value": "pitch", "ratio": 25 }]
+            },
+            {
+                "name": "rudder",
+                "type": "airfoil",
+                "position": [0, -9.8, 1.8],
+                "liftFactor": 10,
+                "dragFactor": 0.2,
+                "forceDirection": "X",
+                "points": { "forceSourcePoint": [0, 0, 0] },
+                "animations": [{ "type": "rotate", "axis": "Z", "value": "yaw", "ratio": -30 }]
+            },
+            {
+                "name": "mainGearLeft",
+                "type": "wheel",
+                "position": [2.3, -1.6, -3.0],
+                "collisionPoints": [[0, 0, -0.45]],
+                "animations": [
+                    { "type": "rotate", "axis": "X", "value": "gearPosition", "ratio": -90 },
+                    { "type": "hide", "value": "gearPosition", "threshold": 0.9 }
+                ],
+                "suspension": { "stiffness": 80, "damping": 2 }
+            },
+            {
+                "name": "mainGearRight",
+                "type": "wheel",
+                "position": [-2.3, -1.6, -3.0],
+                "collisionPoints": [[0, 0, -0.45]],
+                "animations": [
+                    { "type": "rotate", "axis": "X", "value": "gearPosition", "ratio": -90 },
+                    { "type": "hide", "value": "gearPosition", "threshold": 0.9 }
+                ],
+                "suspension": { "stiffness": 80, "damping": 2 }
+            },
+            {
+                "name": "frontWheel",
+                "type": "wheel",
+                "position": [0, 9.0, -3.0],
+                "collisionPoints": [[0, 0, -0.45]],
+                "animations": [
+                    { "type": "rotate", "axis": "Z", "value": "yaw", "ratio": 30 },
+                    { "type": "rotate", "frame": "parent", "axis": "X", "value": "gearPosition", "ratio": -110 },
+                    { "type": "hide", "value": "gearPosition", "threshold": 0.9 }
+                ],
+                "suspension": { "stiffness": 30, "damping": 2 }
+            },
+            {
+                "name": "rightEngine",
+                "type": "engine",
+                "thrust": 93000,
+                "forceDirection": "Y",
+                "points": { "forceSourcePoint": [0.6, -9.5, 0.1] }
+            },
+            {
+                "name": "leftEngine",
+                "type": "engine",
+                "thrust": 93000,
+                "forceDirection": "Y",
+                "points": { "forceSourcePoint": [-0.6, -9.5, 0.1] }
+            }
+        ],
+        "contactProperties": {
+            "wheel": { "frictionCoef": 2, "dynamicFriction": 0.01, "rollingFriction": 0.00001, "damping": 1 },
+            "frame": { "frictionCoef": 2, "dynamicFriction": 0.01, "damping": 1 },
+            "airfoil": { "frictionCoef": 2, "dynamicFriction": 0.01, "damping": 1 }
+        },
+        "soundSet": "player",
+        "sounds": [],
+        "cameras": {
+            "follow": { "distance": 48 },
+            "cockpit": { "position": [0, 8.2, 1.4], "orientation": [0, 0, 0] }
+        }
+    }
+]

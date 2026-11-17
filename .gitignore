@@ -2,5 +2,7 @@
 MiG-31 Foxhound*.zip
 _hors-depot/
 mig31/
+!assets/mig31/
+!assets/mig31/**
 *.obj
 *.mtl
