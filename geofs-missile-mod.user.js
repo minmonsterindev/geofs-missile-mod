@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.11.0
+// @version      1.12.0
 // @updated      2026-11-17
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.11.0';
+    const VERSION = '1.12.0';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -78,7 +78,9 @@
         { re: /f-?15|eagle/i, name: 'F-15 Eagle', span: 6.5, missiles: 8, bombs: 6 },
         { re: /f-?14|tomcat/i, name: 'F-14 Tomcat', span: 6.3, missiles: 8, bombs: 0 },
         { re: /f-?4|phantom/i, name: 'F-4 Phantom', span: 5.9, missiles: 6, bombs: 6 },
-        { re: /mig-?29|mig-?31|mig-?25|fulcrum|foxhound/i, name: 'MiG', span: 5.7, missiles: 6, bombs: 0 },
+        // MiG-31 : 8 emports sous le ventre, relevés sur le Mecabricks (voir README).
+        { re: /mig-?31|foxhound/i, name: 'MiG-31 Foxhound', span: 6.75, missiles: 8, bombs: 0 },
+        { re: /mig-?29|mig-?25|fulcrum/i, name: 'MiG-29 Fulcrum', span: 5.65, missiles: 6, bombs: 0 },
         { re: /a-?10|warthog|thunderbolt/i, name: 'A-10 Warthog', span: 8.8, missiles: 6, bombs: 8 },
         { re: /tornado/i, name: 'Panavia Tornado', span: 7.0, missiles: 6, bombs: 6 },
         { re: /gripen/i, name: 'Saab Gripen', span: 4.2, missiles: 6, bombs: 4 },
@@ -129,6 +131,13 @@
             name: 'AIM-54 Phoenix', body: '#e4e0d4', nose: '#8a7a5a', band: '#5c4a2a',
             maxSpeed: 950, accel: 150, turnRate: 1.1, range: 80000, life: 70, proximity: 28,
             caliber: 0.380, length: 3.96, noseLen: 0.78, finSpan: 0.92, finChord: 0.56, canards: 4
+        },
+        // Arme relevée sur le MiG-31 du Mecabricks : les huit munitions du modèle
+        // sont des engins courts à corps blanc et ailettes en croix.
+        {
+            name: 'R-60 Aphid (MiG-31)', body: '#fbfbfb', nose: '#9aa0a6', band: '#b8352f',
+            maxSpeed: 700, accel: 300, turnRate: 3.2, range: 10000, life: 22, proximity: 14,
+            caliber: 0.120, length: 2.10, noseLen: 0.34, finSpan: 0.30, finChord: 0.24, canards: 4
         }
     ];
 

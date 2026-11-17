@@ -1,0 +1,6 @@
+# --- Sources 3D Mecabricks (hors dépôt : 60 Mo d'OBJ, 1,5 M de faces) ---
+MiG-31 Foxhound*.zip
+_hors-depot/
+mig31/
+*.obj
+*.mtl
