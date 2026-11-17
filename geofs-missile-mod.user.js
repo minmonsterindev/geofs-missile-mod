@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.16.1
+// @version      1.16.2
 // @updated      2026-11-17
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.16.1';
+    const VERSION = '1.16.2';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -550,7 +550,10 @@
             '.gmm-btn:hover{background:rgba(57,255,136,.24)}',
             '.gmm-btn.small{padding:1px 7px;min-width:22px}',
             '.gmm-btn.actif{background:rgba(57,255,136,.42);border-color:#39ff88;color:#04120a;font-weight:700}',
-            '.gmm-panel .choix{display:flex;gap:6px}'
+            '.gmm-panel .choix{display:flex;gap:6px}',
+            '.gmm-x{position:absolute;right:6px;top:3px;padding:2px 7px;background:none;border:0;',
+            'color:#5c8f72;font:14px/1 ui-monospace,monospace;cursor:pointer}',
+            '.gmm-x:hover{color:#eafff2}'
         ].join('');
         document.head.appendChild(style);
 
@@ -577,6 +580,7 @@
             ev.stopPropagation();
             const act = b.getAttribute('data-act');
             if (act === 'bonus') toggleBonus();
+            else if (act === 'close') togglePanel(false);
             else if (act === 'modele-geofs') { if (BONUS.on) toggleBonus(); }
             else if (act === 'modele-lego') { if (!BONUS.on) toggleBonus(); }
             else if (act === 'reset') bonusReset();
@@ -1876,6 +1880,7 @@
         const o = BONUS.offset;
         const h = [];
 
+        h.push('<button class="gmm-x" data-act="close" title="Fermer">✕</button>');
         h.push('<h4>◈ SYSTÈME D\'ARMEMENT <span class="dim">v' + VERSION + '</span></h4>');
         h.push('<div class="row"><span>Avion</span><span class="v">' + name + '</span></div>');
         h.push('<div class="row"><span>État</span><span class="' + (S.armed ? 'armed' : 'dim') + '">' +
