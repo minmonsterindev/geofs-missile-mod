@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.17.0
+// @version      1.17.1
 // @updated      2026-11-17
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.17.0';
+    const VERSION = '1.17.1';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1744,10 +1744,12 @@
     // collision du modèle GeoFS), ce qui revient à poser les roues au sol.
     function bonusLayout() {
         const belly = (S.geo && typeof S.geo.belly === 'number') ? S.geo.belly : -2.5;
+        // +0,25 m : les points de collision sont à l'intérieur du maillage, sans
+        // cette marge les roues du LEGO s'enfoncent d'une vingtaine de cm.
         BONUS.offset = [
             BONUS.adjust[0],
             BONUS.adjust[1],
-            Math.round((belly + BONUS.half + BONUS.adjust[2]) * 100) / 100
+            Math.round((belly + BONUS.half + 0.25 + BONUS.adjust[2]) * 100) / 100
         ];
     }
 
