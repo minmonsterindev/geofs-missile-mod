@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.12.0
+// @version      1.13.0
 // @updated      2026-11-17
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.12.0';
+    const VERSION = '1.13.0';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -41,7 +41,8 @@
             type: '*',
             target: 'u',
             reload: 'd',
-            calibrate: 'shift+d'
+            calibrate: 'shift+d',
+            bonus: 'k'
         },
 
         // Vol du missile : les performances propres à chaque missile sont dans
@@ -1577,7 +1578,8 @@
             '[' + keyLabel(CFG.keys.target) + '] cible &nbsp; ' +
             '[' + keyLabel(CFG.keys.bomb) + '] bombe<br>' +
             '[' + keyLabel(CFG.keys.reload) + '] réarmer &nbsp; ' +
-            '[' + keyLabel(CFG.keys.calibrate) + '] calibrage' +
+            '[' + keyLabel(CFG.keys.calibrate) + '] calibrage &nbsp; ' +
+            '[' + keyLabel(CFG.keys.bonus) + '] LEGO' +
             '</div>';
     }
 
@@ -1637,6 +1639,69 @@
             if (now - S.hudAt > 200) { S.hudAt = now; updateHUD(); }
         } catch (e) {
             warn('tick', e);
+        }
+    }
+
+    /* ==================== AVION BONUS (MiG-31 LEGO) ==================== */
+    // Modèle servi par le dépôt (assets/mig31-lego.glb : 843 Ko, 14 232
+    // triangles, 11 matériaux). Cesium le charge comme un glTF ordinaire ; on
+    // masque le mesh GeoFS et on pose le nôtre sur le même repère, donc
+    // l'avion vole, décollé et se pilote normalement.
+    // Repère du modèle : X = gauche, Y = avant, Z = haut (comme les emports).
+    const BONUS = {
+        url: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31-lego.glb',
+        entity: null,
+        on: false,
+        offset: [0, 0, 0]      // [gauche, avant, haut] en mètres, si besoin d'ajuster
+    };
+
+    function bonusQuat() {
+        const Cesium = C();
+        const fr = currentFrame();
+        if (!fr) return Cesium.Quaternion.IDENTITY;
+        try {
+            const m = Cesium.Matrix3.fromColumnMajorArray(
+                [fr.R.x, fr.R.y, fr.R.z, fr.U.x, fr.U.y, fr.U.z, fr.F.x, fr.F.y, fr.F.z],
+                new Cesium.Matrix3()
+            );
+            return Cesium.Quaternion.fromRotationMatrix(m, new Cesium.Quaternion());
+        } catch (e) { return quatFromZ(fr.F); }
+    }
+
+    function toggleBonus() {
+        const Cesium = C();
+        const v = viewer();
+        if (!v || !Cesium) return;
+        const ac = geofs.aircraft.instance;
+        const mesh = ac && ac.object3d && ac.object3d.model;
+
+        if (BONUS.on) {
+            BONUS.on = false;
+            if (BONUS.entity) { try { v.entities.remove(BONUS.entity); } catch (e) { } }
+            BONUS.entity = null;
+            try { if (mesh) mesh.show = true; } catch (e) { }
+            toast('Modèle GeoFS restauré', '#39ff88');
+            return;
+        }
+
+        try {
+            BONUS.entity = v.entities.add({
+                position: new Cesium.CallbackProperty(() => {
+                    const fr = currentFrame();
+                    if (!fr) return Cesium.Cartesian3.fromDegrees(0, 0, 0);
+                    return offsetPos(fr, BONUS.offset[0], BONUS.offset[1], BONUS.offset[2]);
+                }, false),
+                orientation: new Cesium.CallbackProperty(bonusQuat, false),
+                model: { uri: BONUS.url, minimumPixelSize: 64, scale: 1.0 }
+            });
+            try { if (mesh) mesh.show = false; } catch (e) { }
+            BONUS.on = true;
+            toast('MiG-31 LEGO — ' + keyLabel(CFG.keys.bonus) + ' pour revenir au modèle GeoFS', '#8ef6ff');
+        } catch (e) {
+            warn('avion bonus', e);
+            try { if (mesh) mesh.show = true; } catch (err) { }
+            BONUS.on = false;
+            toast('Modèle bonus indisponible', '#ff5a3c');
         }
     }
 
@@ -1743,6 +1808,7 @@
             else if (matchAny(e, CFG.keys.target)) action = cycleTarget;
             else if (matchAny(e, CFG.keys.reload)) action = reload;
             else if (matchAny(e, CFG.keys.calibrate)) action = toggleCalibration;
+            else if (matchAny(e, CFG.keys.bonus)) action = toggleBonus;
             if (!action) return;
 
             e.preventDefault();
