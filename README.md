@@ -5,7 +5,7 @@ Missiles air-air et bombes pour les avions militaires de [GeoFS](https://www.geo
 textures canvas).
 
 Version **1.19.0** : le MiG-31 bonus est maintenant un vrai maillage LEGO détaillé
-(93 000 triangles, couleurs et décalques d'origine) au lieu d'une version simplifiée, et le
+(87 000 triangles, couleurs et décalques d'origine) au lieu d'une version simplifiée, et le
 script se met à jour tout seul depuis GitHub.
 
 ## Installation (Tampermonkey)
@@ -210,10 +210,12 @@ charge comme n'importe quel avion du jeu.
 
 - `assets/mig31/aircraft.json` — définition : 41 t, 2 × 93 kN, 13,46 m
 d'envergure, 22,70 m de long, `startAltitude` 3,45 m (ventre du modèle) ;
-- `assets/mig31/mig31-lego.glb` — le maillage (**93 179 triangles**, 7 Mo),
+- `assets/mig31/mig31-lego.glb` — le maillage (**87 285 triangles**, 7 Mo),
 échelle réelle. Il est reconstruit depuis l'export Mecabricks d'origine :
-1,55 M de faces réduites à 93 k en gardant les briques, les 15 couleurs de
-pièces et les 6 décalques imprimés (textures embarquées dans le GLB) ;
+1,55 M de faces, dont les 42 % de faces intérieures invisibles sont retirées,
+puis simplifiées brique par brique (une brique ne peut pas être fondue dans
+une grande facette voisine). Les 15 couleurs de pièces et les 6 décalques
+imprimés sont conservés, textures embarquées dans le GLB ;
 - chargement : `parseRecord()` sur l'enregistrement (`definition` = JSON encodé
 en base64), puis `unloadAircraft()` et `init(définition, coordonnées)`,
 exactement la chaîne employée par Extra Vehicles.
