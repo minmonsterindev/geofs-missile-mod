@@ -663,6 +663,7 @@
                 return R;
             };
             const boxes = [];
+            const pboxes = [];       // une boîte par primitive (par pièce LEGO)
             const walk = (idx, parent) => {
                 const n = gl.nodes[idx];
                 if (!n) return;
@@ -672,6 +673,7 @@
                     (gl.meshes[n.mesh].primitives || []).forEach(p => {
                         const acc = gl.accessors[p.attributes && p.attributes.POSITION];
                         if (!acc || !acc.min || !acc.max) return;
+                        let qn0 = 1e9, qn1 = 1e9, qn2 = 1e9, qx0 = -1e9, qx1 = -1e9, qx2 = -1e9;
                         for (let i = 0; i < 8; i++) {
                             const x = i & 1 ? acc.max[0] : acc.min[0];
                             const y = i & 2 ? acc.max[1] : acc.min[1];
@@ -682,10 +684,20 @@
                             mn0 = Math.min(mn0, wx); mx0 = Math.max(mx0, wx);
                             mn1 = Math.min(mn1, wy); mx1 = Math.max(mx1, wy);
                             mn2 = Math.min(mn2, wz); mx2 = Math.max(mx2, wz);
+                            qn0 = Math.min(qn0, wx); qx0 = Math.max(qx0, wx);
+                            qn1 = Math.min(qn1, wy); qx1 = Math.max(qx1, wy);
+                            qn2 = Math.min(qn2, wz); qx2 = Math.max(qx2, wz);
+                        }
+                        if (qn0 < 1e8) {
+                            // glTF (x, y, z) -> Cesium (x, -z, y)
+                            pboxes.push({
+                                x0: qn0, x1: qx0,
+                                y0: -qx2, y1: -qn2,
+                                z0: qn1, z1: qx1
+                            });
                         }
                     });
                     if (mn0 < 1e8) {
-                        // glTF (x, y, z) -> Cesium (x, -z, y)
                         boxes.push({
                             x0: mn0, x1: mx0,
                             y0: -mx2, y1: -mn2,
@@ -724,7 +736,7 @@
             // stabilisateur. Une aile faite de briques n'a pas de boîte
             // englobante crédible, mais ces plaques donnent sa vraie
             // planforme, station par station (voir wingUnder).
-            const plates = boxes.filter(b => {
+            const plates = (pboxes.length ? pboxes : boxes).filter(b => {
                 const h = b.z1 - b.z0;
                 const cx = (b.x0 + b.x1) / 2;
                 const cy = (b.y0 + b.y1) / 2;
