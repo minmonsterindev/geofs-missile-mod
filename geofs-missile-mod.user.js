@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.18.2
+// @version      1.18.3
 // @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.18.2';
+    const VERSION = '1.18.3';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1740,7 +1740,7 @@
             })
             .then(txt => {
                 const rec = {
-                    id: BONUS.id,
+                    id: BONUS.id,              // remplacé par l'id de l'avion d'origine
                     name: BONUS.name,
                     fullPath: BONUS.base,
                     isPremium: false,
@@ -1757,6 +1757,11 @@
                         fullPath: inst.fullPath
                     };
                 }
+                // GeoFS enregistre le vol avec l'id de l'avion courant : garder
+                // l'id d'origine évite un « could not load aircraft file » au
+                // prochain lancement (9917 n'existe pas côté GeoFS).
+                const savedId = BONUS.saved.record && BONUS.saved.record.id;
+                if (savedId !== undefined && savedId !== null) rec.id = savedId;
                 const parsed = inst.parseRecord(JSON.stringify(rec));
                 if (!parsed) throw new Error('définition refusée');
                 const coords = bonusCoords();
