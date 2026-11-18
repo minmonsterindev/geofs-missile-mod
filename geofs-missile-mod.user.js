@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.18.0
-// @updated      2026-11-17
+// @version      1.18.1
+// @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
 // @updateURL    https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/geofs-missile-mod.user.js
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.18.0';
+    const VERSION = '1.18.1';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1732,8 +1732,8 @@
                     definition: btoa(unescape(encodeURIComponent(txt))),
                     multiplayerFiles: []
                 };
-                const parsed = inst.parseRecord(JSON.stringify(rec));
-                if (!parsed) throw new Error('définition refusée');
+                // À sauvegarder AVANT parseRecord(), qui remplace déjà
+                // instance.aircraftRecord par le nouvel avion.
                 if (!BONUS.saved) {
                     BONUS.saved = {
                         definition: inst.definition,
@@ -1741,6 +1741,8 @@
                         fullPath: inst.fullPath
                     };
                 }
+                const parsed = inst.parseRecord(JSON.stringify(rec));
+                if (!parsed) throw new Error('définition refusée');
                 const coords = bonusCoords();
                 inst.unloadAircraft();
                 inst.fullPath = rec.fullPath;
