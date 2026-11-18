@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.18.1
+// @version      1.18.2
 // @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.18.1';
+    const VERSION = '1.18.2';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1706,6 +1706,22 @@
         try { return geofs.aircraft.instance.getCurrentCoordinates(); } catch (e) { return undefined; }
     }
 
+    // Un changement d'avion garde la caméra là où elle était : en vue cockpit
+    // on arrive dans le fuselage, et la vue « chase » y reste collée tant que
+    // l'avion ne bouge pas. On repart donc d'une vue extérieure cadrée.
+    function bonusExteriorView() {
+        try {
+            const c = geofs.camera;
+            if (!c || !c.modes || typeof c.set !== 'function') return;
+            const cur = c.currentDefinition;
+            if (cur && cur.view === 'follow') return;
+            const follow = c.modes.filter(m => m && m.view === 'follow')[0];
+            if (follow) c.set(follow);
+        } catch (e) {
+            warn('caméra bonus', e);
+        }
+    }
+
     function bonusLoadModel() {
         if (BONUS.loading || BONUS.active) return;
         const inst = geofs.aircraft.instance;
@@ -1748,6 +1764,7 @@
                 inst.fullPath = rec.fullPath;
                 inst.aircraftRecord = rec;
                 inst.init(parsed, coords);
+                bonusExteriorView();
                 BONUS.active = true;
                 BONUS.loading = false;
                 updateHUD();
@@ -1771,6 +1788,7 @@
             inst.fullPath = BONUS.saved.fullPath;
             inst.aircraftRecord = BONUS.saved.record;
             inst.init(BONUS.saved.definition, coords);
+            bonusExteriorView();
             BONUS.active = false;
             updateHUD();
             toast('Avion GeoFS d\'origine', '#39ff88');
