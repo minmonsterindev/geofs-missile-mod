@@ -4,20 +4,33 @@ Missiles air-air et bombes pour les avions militaires de [GeoFS](https://www.geo
 100 % autonome : aucun modèle 3D ni texture externe, tout est généré (géométrie Cesium et
 textures canvas).
 
-Version **1.10.0** : l'aile est lue dans le **maillage réel** de l'avion (glTF), les missiles sont
-posés 18 cm sous le dessous de voilure et répartis de la racine au bout. Position calculée au
-rendu par une matrice modèle → ECEF. Le calibrage affiche un **repère visible sur chaque
-emport**. Validé en jeu sur Su-35, F-16 et Rafale.
+Version **1.19.0** : le MiG-31 bonus est maintenant un vrai maillage LEGO détaillé
+(93 000 triangles, couleurs et décalques d'origine) au lieu d'une version simplifiée, et le
+script se met à jour tout seul depuis GitHub.
 
 ## Installation (Tampermonkey)
 
-1. Installe l'extension **Tampermonkey** (Chrome, Edge, Firefox, Opera, Safari).
-2. Tableau de bord Tampermonkey → onglet **+** → supprime tout le contenu.
-3. Colle l'intégralité de [`geofs-missile-mod.user.js`](geofs-missile-mod.user.js), puis `Ctrl+S`.
-4. Vérifie que le script est **activé** (interrupteur vert).
-5. Va sur <https://www.geo-fs.com/geofs.php>, choisis un avion et décolle.
+**Méthode recommandée — mise à jour automatique :**
 
-La console (`F12`) affiche `[MissileMod] v1.10.0 prêt`.
+1. Installe l'extension **Tampermonkey** (Chrome, Edge, Firefox, Opera, Safari).
+2. Ouvre <https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/geofs-mig31-autoupdate.user.js>
+   et clique sur **Installer**.
+3. Vérifie que le script est **activé** (interrupteur vert), puis va sur
+   <https://www.geo-fs.com/geofs.php>.
+
+Ce petit fichier ne contient pas le mod : à chaque ouverture de GeoFS il télécharge la dernière
+version de [`geofs-missile-mod.user.js`](geofs-missile-mod.user.js) et l'exécute. Il n'y a donc
+plus rien à réinstaller après une mise à jour du dépôt. Le mod se protège d'un double
+chargement, garder l'ancien script installé ne gêne pas.
+
+**Méthode manuelle :**
+
+1. Tableau de bord Tampermonkey → onglet **+** → supprime tout le contenu.
+2. Colle l'intégralité de [`geofs-missile-mod.user.js`](geofs-missile-mod.user.js), puis `Ctrl+S`.
+3. Le script porte `@updateURL` / `@downloadURL` : Tampermonkey le met à jour tout seul
+   (Tableau de bord → **Paramètres → Vérifier les mises à jour**, par défaut toutes les 12 h).
+
+La console (`F12`) affiche `[MissileMod] v1.19.0 prêt`.
 
 ## Commandes
 
@@ -197,8 +210,10 @@ charge comme n'importe quel avion du jeu.
 
 - `assets/mig31/aircraft.json` — définition : 41 t, 2 × 93 kN, 13,46 m
 d'envergure, 22,70 m de long, `startAltitude` 3,45 m (ventre du modèle) ;
-- `assets/mig31/mig31-lego.glb` — le maillage (14 232 triangles, 843 Ko),
-échelle réelle ;
+- `assets/mig31/mig31-lego.glb` — le maillage (**93 179 triangles**, 7 Mo),
+échelle réelle. Il est reconstruit depuis l'export Mecabricks d'origine :
+1,55 M de faces réduites à 93 k en gardant les briques, les 15 couleurs de
+pièces et les 6 décalques imprimés (textures embarquées dans le GLB) ;
 - chargement : `parseRecord()` sur l'enregistrement (`definition` = JSON encodé
 en base64), puis `unloadAircraft()` et `init(définition, coordonnées)`,
 exactement la chaîne employée par Extra Vehicles.
