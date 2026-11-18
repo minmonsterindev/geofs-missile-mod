@@ -39,7 +39,7 @@
                 "model": "mig31-lego.glb",
                 "shadows": "SHADOWS_NONE",
                 "position": [0, 0, 0],
-                "rotation": [0, 0, 0],
+                "rotation": [0, 0, -90],
                 "liftFactor": 25,
                 "dragFactor": 0.2,
                 "forceDirection": "X",
