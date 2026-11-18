@@ -37,8 +37,9 @@
                 "name": "body",
                 "type": "airfoil",
                 "model": "mig31-lego.glb",
+                "shadows": "SHADOWS_NONE",
                 "position": [0, 0, 0],
-                "rotation": [0, 0, 180],
+                "rotation": [0, 0, 0],
                 "liftFactor": 25,
                 "dragFactor": 0.2,
                 "forceDirection": "X",
@@ -202,7 +203,7 @@
         "soundSet": "player",
         "sounds": [],
         "cameras": {
-            "follow": { "distance": 48 },
+            "follow": { "distance": 50 },
             "cockpit": { "position": [0, 8.2, 1.4], "orientation": [0, 0, 0] }
         }
     }
