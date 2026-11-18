@@ -4,10 +4,10 @@ Missiles air-air et bombes pour les avions militaires de [GeoFS](https://www.geo
 100 % autonome : aucun modèle 3D ni texture externe, tout est généré (géométrie Cesium et
 textures canvas).
 
-Version **1.19.1** : le MiG-31 bonus est un vrai maillage LEGO détaillé (109 000 triangles,
+Version **1.19.3** : le MiG-31 bonus est un vrai maillage LEGO détaillé (109 000 triangles,
 couleurs et décalques d'origine) reconstruit depuis l'export GLB du modèle Mecabricks, il
-décolle à nouveau (poussée de postcombustion et contact ventre corrigé) et le script se met
-à jour tout seul depuis GitHub.
+décolle à nouveau (poussée de postcombustion et contact ventre corrigé), ses missiles sont
+posés sous la vraie voilure et le script se met à jour tout seul depuis GitHub.
 
 ## Installation (Tampermonkey)
 
@@ -31,7 +31,7 @@ chargement, garder l'ancien script installé ne gêne pas.
 3. Le script porte `@updateURL` / `@downloadURL` : Tampermonkey le met à jour tout seul
    (Tableau de bord → **Paramètres → Vérifier les mises à jour**, par défaut toutes les 12 h).
 
-La console (`F12`) affiche `[MissileMod] v1.19.0 prêt`.
+La console (`F12`) affiche `[MissileMod] v1.19.3 prêt`.
 
 ## Commandes
 
@@ -133,6 +133,12 @@ la racine vers le bout.
 Sur le Su-35 : aile de 2,05 à 6,43 m, dessous à **0,21 m** → missiles à **0,03 m**, collés sous
 l'aile. Le maillage arrive après le changement d'appareil, donc le calcul est retenté deux fois
 par seconde et les emports sont replacés dès qu'il est disponible.
+
+Sur le MiG-31 LEGO l'aile est une mosaïque de briques : aucune boîte englobante n'est crédible.
+Les plaques fines du maillage sont alors lues **station par station** (corde locale et dessous de
+voilure, la médiane écartant les trappes de train qui pendent plus bas). Sans ça, les missiles
+se posaient à une fraction de la demi-longueur, donc devant le bord d'attaque très en flèche :
+ils flottaient en l'air à côté de l'aile (corrigé en 1.19.3).
 
 **2. Repli** si la pièce trouvée n'est pas crédible — l'aile du F-16 est fondue dans le `body`,
 et sur le Rafale c'est un volet qui est le plus large : 25 cm sous le plan de voilure annoncé par

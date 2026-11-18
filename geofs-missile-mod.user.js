@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.19.2
+// @version      1.19.3
 // @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.19.2';
+    const VERSION = '1.19.3';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -618,7 +618,7 @@
     // Repère du fichier glTF : Y en haut. Cesium le convertit en Z en haut,
     // donc (x, y, z) glTF devient (x, -z, y) : x = envergure, y = longueur,
     // z = hauteur. C'est exactement le repère des points d'emport.
-    function wingBox() {
+    function meshWing() {
         // Le maillage d'un avion GeoFS est porté par la partie « body » :
         // `instance.object3d.model` n'existe que sur certains appareils. On
         // essaie donc la racine puis chaque partie, sinon les emports
@@ -635,13 +635,18 @@
             const mdl = ods[ci].model && ods[ci].model._model;
             const glf = mdl && mdl._cachedGltf && mdl._cachedGltf.gltf;
             if (!glf || !glf.nodes || !glf.meshes) continue;
-            const found = wingBoxIn(glf);
+            const found = meshWingIn(glf);
             if (found) return found;
         }
         return null;
     }
 
-    function wingBoxIn(gl) {
+    function wingBox() {
+        const found = meshWing();
+        return found ? found.box : null;
+    }
+
+    function meshWingIn(gl) {
         try {
 
             const I = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
@@ -695,8 +700,11 @@
             (scene.nodes || []).forEach(i => walk(i, I4));
             if (!boxes.length) return null;
 
-            let half = 0;
-            boxes.forEach(b => { half = Math.max(half, Math.abs(b.x0), Math.abs(b.x1)); });
+            let half = 0, halfLen = 0;
+            boxes.forEach(b => {
+                half = Math.max(half, Math.abs(b.x0), Math.abs(b.x1));
+                halfLen = Math.max(halfLen, Math.abs(b.y0), Math.abs(b.y1));
+            });
             if (!(half > 0.5)) return null;
 
             // Une aile est large, plate et devant. Le fuselage entier est plus
@@ -711,8 +719,54 @@
                 if (cy < -0.15 * half) return;
                 if (!wing || w > wing.x1 - wing.x0) wing = b;
             });
-            return wing;
+
+            // Plaques de voilure : fines, loin de l'axe et devant le
+            // stabilisateur. Une aile faite de briques n'a pas de boîte
+            // englobante crédible, mais ces plaques donnent sa vraie
+            // planforme, station par station (voir wingUnder).
+            const plates = boxes.filter(b => {
+                const h = b.z1 - b.z0;
+                const cx = (b.x0 + b.x1) / 2;
+                const cy = (b.y0 + b.y1) / 2;
+                if (h > 0.6) return false;
+                if (Math.abs(cx) < 0.3 * half || Math.abs(cx) > 1.05 * half) return false;
+                if (cy < -0.7 * halfLen) return false;
+                return (b.x1 - b.x0) > 0.10 * half;
+            });
+            return { box: wing, plates: plates, half: half, halfLen: halfLen };
         } catch (e) { return null; }
+    }
+
+    // Corde et dessous de voilure à une station donnée, lus dans les plaques
+    // du maillage. Sert quand l'aile n'est pas une boîte unique : une aile en
+    // briques (MiG-31 LEGO) est découpée en dizaines de plaques, et poser les
+    // missiles à une fraction de la demi-longueur les faisait flotter devant
+    // le bord d'attaque, hors de l'aile.
+    function wingUnder(plates, xAbs, droop) {
+        if (!plates || !plates.length) return null;
+        const sel = [];
+        for (let i = 0; i < plates.length; i++) {
+            const b = plates[i];
+            if (xAbs < b.x0 - 0.25 || xAbs > b.x1 + 0.25) continue;
+            sel.push(b);
+        }
+        if (sel.length < 2) return null;
+        // Le dessous de voilure est la hauteur la plus fréquente : les trappes
+        // de train pendent bien plus bas et fausseraient un simple minimum.
+        const zs = sel.map(b => b.z0).sort((a, b) => a - b);
+        const med = zs[Math.floor(zs.length / 2)];
+        let yLead = -1e9, yTrail = 1e9, zUnder = 1e9, n = 0;
+        sel.forEach(b => {
+            if (Math.abs(b.z0 - med) > 0.4) return;
+            n++;
+            if (b.y1 > yLead) yLead = b.y1;
+            if (b.y0 < yTrail) yTrail = b.y0;
+            if (b.z0 < zUnder) zUnder = b.z0;
+        });
+        if (n < 2) return null;
+        const chord = yLead - yTrail;
+        if (!(chord > 0.8)) return null;
+        return { y: yLead - 0.5 * chord, z: zUnder - 0.18 - droop };
     }
 
     // Dimensions réelles de l'appareil, lues dans les points de collision du
@@ -723,7 +777,8 @@
             halfLen: ((profile && profile.span) || 5.5) * 1.1,
             belly: -1.0,
             wingZ: null,         // hauteur du plan de voilure (points de force)
-            wing: null           // boîte du maillage de l'aile (voir wingBox)
+            wing: null,          // boîte du maillage de l'aile (voir wingBox)
+            plates: null         // plaques de voilure (voir meshWingIn)
         };
         try {
             const ac = geofs.aircraft.instance;
@@ -760,7 +815,10 @@
             });
             if (wingZ !== null) g.wingZ = wingZ;
         } catch (e) { }
-        try { g.wing = wingBox(); } catch (e) { }
+        try {
+            const m = meshWing();
+            if (m) { g.wing = m.box; g.plates = m.plates; }
+        } catch (e) { }
         return g;
     }
 
@@ -1104,9 +1162,12 @@
                 y = wing.y0 + 0.55 * (wing.y1 - wing.y0);
                 z = wingU;
             } else if (k < wingSlots) {
+                // Aile en briques : on mesure la corde et le dessous de
+                // voilure à la station, sinon le missile flotte devant l'aile.
+                const under = wingUnder(g.plates, WING_SLOTS[k][0] * g.halfSpan, droop);
                 x = WING_SLOTS[k][0] * g.halfSpan;
-                y = g.halfLen * WING_SLOTS[k][1];
-                z = wingU;
+                y = under ? under.y : g.halfLen * WING_SLOTS[k][1];
+                z = under ? under.z : wingU;
             } else {
                 // sous le fuselage : deux paires décalées, sinon elles se
                 // superposent exactement au même point.
@@ -1675,14 +1736,19 @@
     // replace les emports dès qu'on l'a.
     let wingAt = 0;
     function retryWingBox() {
-        if (!S.profile || S.geo.wing) return;
+        if (!S.profile) return;
+        if (S.geo.wing && S.geo.plates) return;
         const now = performance.now();
         if (now - wingAt < 500) return;
         wingAt = now;
-        const w = wingBox();
-        if (!w) return;
+        const m = meshWing();
+        if (!m) return;
+        const gotBox = !S.geo.wing && m.box;
+        const gotPlates = !S.geo.plates && m.plates && m.plates.length;
+        if (!gotBox && !gotPlates) return;
         if (!S.stations.concat(S.bombStations).every(st => !st.used)) return;
-        S.geo.wing = w;
+        if (gotBox) S.geo.wing = m.box;
+        if (gotPlates) S.geo.plates = m.plates;
         buildStations(S.profile);
     }
 
