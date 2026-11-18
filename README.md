@@ -4,9 +4,10 @@ Missiles air-air et bombes pour les avions militaires de [GeoFS](https://www.geo
 100 % autonome : aucun modèle 3D ni texture externe, tout est généré (géométrie Cesium et
 textures canvas).
 
-Version **1.19.0** : le MiG-31 bonus est maintenant un vrai maillage LEGO détaillé
-(109 000 triangles, couleurs et décalques d'origine) reconstruit depuis l'export GLB du
-modèle Mecabricks, et le script se met à jour tout seul depuis GitHub.
+Version **1.19.1** : le MiG-31 bonus est un vrai maillage LEGO détaillé (109 000 triangles,
+couleurs et décalques d'origine) reconstruit depuis l'export GLB du modèle Mecabricks, il
+décolle à nouveau (poussée de postcombustion et contact ventre corrigé) et le script se met
+à jour tout seul depuis GitHub.
 
 ## Installation (Tampermonkey)
 
@@ -230,6 +231,21 @@ par le bouton « GeoFS ».
 La hauteur ne se règle plus à la main : `startAltitude` place le ventre du
 modèle à 3,45 m, les points de collision du train touchent le sol, et les
 emports du mod se répartissent sur les 8 points sous le ventre.
+
+### Décollage et contacts au sol
+
+Le ventre du modèle est au même niveau que le bas des roues : le fuselage pose
+donc sur la piste, et le contact `airfoil` (coefficient 2, comme sur un avion
+dont les roues dépassent) bloquait l'avion vers 11 m/s plein gaz. `airfoil`
+utilise maintenant un contact glissant (`frictionCoef` 0,01) : le MiG roule,
+s'accélère et décolle normalement. Les moteurs passent à 152 kN chacun (poussée
+de postcombustion ; 93 kN était la poussée à sec, insuffisante pour atteindre
+les 200 m/s de `minimumSpeed` avant le bout de la piste).
+
+Le train et les gouvernes ne bougent pas visuellement : le GLB est un maillage
+unique, les parties `mainGearLeft`, `aileron`, `rudder`… de `aircraft.json`
+n'existent pas comme nœuds à animer. La touche `G` change bien l'état physique
+du train (rentrée, points de collision masqués) mais rien ne se voit.
 
 ## Interface dédiée
 
