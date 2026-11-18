@@ -230,7 +230,9 @@ par le bouton « GeoFS ».
 
 La hauteur ne se règle plus à la main : `startAltitude` place le ventre du
 modèle à 3,45 m, les points de collision du train touchent le sol, et les
-emports du mod se répartissent sur les 8 points sous le ventre.
+emports du mod se répartissent sous la voilure : les points de collision des
+bouts d'aile (± 6,85 m) donnent l'envergure réelle au mod, qui plaçait sinon
+les missiles sous le fuselage.
 
 ### Décollage et contacts au sol
 

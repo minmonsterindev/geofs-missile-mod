@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.19.1
+// @version      1.19.2
 // @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.19.1';
+    const VERSION = '1.19.2';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -619,11 +619,30 @@
     // donc (x, y, z) glTF devient (x, -z, y) : x = envergure, y = longueur,
     // z = hauteur. C'est exactement le repère des points d'emport.
     function wingBox() {
+        // Le maillage d'un avion GeoFS est porté par la partie « body » :
+        // `instance.object3d.model` n'existe que sur certains appareils. On
+        // essaie donc la racine puis chaque partie, sinon les emports
+        // retombent sur les points de collision (sous le ventre).
+        const inst = geofs.aircraft.instance;
+        const ods = [];
+        if (inst && inst.object3d) ods.push(inst.object3d);
+        const parts = (inst && inst.parts) || {};
+        for (const k in parts) {
+            const p = parts[k];
+            if (p && p.object3d) ods.push(p.object3d);
+        }
+        for (let ci = 0; ci < ods.length; ci++) {
+            const mdl = ods[ci].model && ods[ci].model._model;
+            const glf = mdl && mdl._cachedGltf && mdl._cachedGltf.gltf;
+            if (!glf || !glf.nodes || !glf.meshes) continue;
+            const found = wingBoxIn(glf);
+            if (found) return found;
+        }
+        return null;
+    }
+
+    function wingBoxIn(gl) {
         try {
-            const od = geofs.aircraft.instance && geofs.aircraft.instance.object3d;
-            const m = od && od.model && od.model._model;
-            const gl = m && m._cachedGltf && m._cachedGltf.gltf;
-            if (!gl || !gl.nodes || !gl.meshes) return null;
 
             const I = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
             const I4 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
