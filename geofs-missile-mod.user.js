@@ -1856,7 +1856,9 @@
         updateHUD();
         toast('Chargement du MiG-31 LEGO…', '#8ef6ff');
 
-        fetch(BONUS.base + 'aircraft.json', { cache: 'no-store' })
+        // anti-cache : le CDN de GitHub garde 5 min, ce qui ferait tourner
+        // l'ancienne définition (donc l'ancienne orientation) après un correctif.
+        fetch(BONUS.base + 'aircraft.json?t=' + Date.now(), { cache: 'no-store' })
             .then(r => {
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 return r.text();
