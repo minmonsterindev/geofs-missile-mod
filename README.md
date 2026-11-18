@@ -4,10 +4,11 @@ Missiles air-air et bombes pour les avions militaires de [GeoFS](https://www.geo
 100 % autonome : aucun modèle 3D ni texture externe, tout est généré (géométrie Cesium et
 textures canvas).
 
-Version **1.19.3** : le MiG-31 bonus est un vrai maillage LEGO détaillé (109 000 triangles,
-couleurs et décalques d'origine) reconstruit depuis l'export GLB du modèle Mecabricks, il
-décolle à nouveau (poussée de postcombustion et contact ventre corrigé), ses missiles sont
-posés sous la vraie voilure et le script se met à jour tout seul depuis GitHub.
+Version **1.19.4** : le MiG-31 bonus est un vrai maillage LEGO détaillé (109 000 triangles,
+couleurs et décalques d'origine) reconstruit depuis l'export GLB du modèle Mecabricks. Il
+décolle (poussée de postcombustion et contact ventre corrigé), il est **orienté dans le bon
+sens** (nez vers l'avant, corrigé en 1.19.4), ses missiles sont posés sous la vraie voilure et
+le script se met à jour tout seul depuis GitHub.
 
 ## Installation (Tampermonkey)
 
@@ -31,7 +32,7 @@ chargement, garder l'ancien script installé ne gêne pas.
 3. Le script porte `@updateURL` / `@downloadURL` : Tampermonkey le met à jour tout seul
    (Tableau de bord → **Paramètres → Vérifier les mises à jour**, par défaut toutes les 12 h).
 
-La console (`F12`) affiche `[MissileMod] v1.19.3 prêt`.
+La console (`F12`) affiche `[MissileMod] v1.19.4 prêt`.
 
 ## Commandes
 
@@ -124,9 +125,9 @@ courante.
 Deux sources, dans cet ordre.
 
 **1. Le maillage de l'aile**, lu dans le glTF chargé par Cesium
-(`object3d.model._model._cachedGltf.gltf`). Les boîtes englobantes des pièces sont parcourues,
-converties en repère Cesium (le glTF est en Y-haut : `(x, y, z) → (x, −z, y)`), et la pièce
-retenue est celle qui est large, plate et devant. On en tire la racine, le bout, la corde et
+(`object3d.model._model._cachedGltf.gltf`). Les boîtes englobantes sont lues **une par
+primitive** (une par brique sur le MiG-31), converties en repère Cesium (le glTF est en Y-haut :
+`(x, y, z) → (x, −z, y)`), et la pièce retenue est celle qui est large, plate et devant. On en tire la racine, le bout, la corde et
 surtout **le dessous de voilure**. Les missiles sont posés 18 cm sous ce dessous, répartis de
 la racine vers le bout.
 
@@ -139,6 +140,12 @@ Les plaques fines du maillage sont alors lues **station par station** (corde loc
 voilure, la médiane écartant les trappes de train qui pendent plus bas). Sans ça, les missiles
 se posaient à une fraction de la demi-longueur, donc devant le bord d'attaque très en flèche :
 ils flottaient en l'air à côté de l'aile (corrigé en 1.19.3).
+
+Le chargement de l'avion bonus est aussi protégé (1.19.4) : la position de reprise est
+cherchée dans `getCurrentCoordinates()`, `llaLocation`, le dernier vol sauvegardé puis la
+caméra. Si GeoFS n'a pas encore placé l'avion, rien n'est démonté et un message demande de
+réessayer — avant, `init()` recevait `undefined` et échouait sur « reading '0' », en laissant
+un demi-avion à l'écran (modèle non orienté).
 
 **2. Repli** si la pièce trouvée n'est pas crédible — l'aile du F-16 est fondue dans le `body`,
 et sur le Rafale c'est un volet qui est le plus large : 25 cm sous le plan de voilure annoncé par

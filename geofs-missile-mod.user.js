@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.19.3
+// @version      1.19.4
 // @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.19.3';
+    const VERSION = '1.19.4';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1799,8 +1799,34 @@
         saved: null              // avion d'origine, pour pouvoir revenir
     };
 
+    // Position de reprise. `getCurrentCoordinates()` lit `this.llaLocation` et
+    // lève « Cannot read properties of undefined (reading '0') » quand l'avion
+    // n'est pas encore placé (juste après le chargement, après une
+    // réinitialisation de vol…). On garde donc une chaîne de replis : sans ça,
+    // init() recevait « undefined » et laissait un demi-avion à l'écran.
     function bonusCoords() {
-        try { return geofs.aircraft.instance.getCurrentCoordinates(); } catch (e) { return undefined; }
+        const inst = geofs.aircraft.instance;
+        const out = [];
+        const add = c => {
+            if (!c || !isFinite(c[0]) || !isFinite(c[1])) return;
+            if (out.length) return;
+            out.push([c[0], c[1], isFinite(c[2]) ? c[2] : 0, isFinite(c[3]) ? c[3] : 0]);
+        };
+        try { add(bonusSafeCoords(inst)); } catch (e) { }
+        try { add(inst && inst.llaLocation); } catch (e) { }
+        try { add(geofs.lastFlightCoordinates); } catch (e) { }
+        try {
+            const c = geofs.camera && geofs.camera.lla;
+            if (c) add([c[0], c[1], Math.max(0, c[2] || 0), 0]);
+        } catch (e) { }
+        return out.length ? out[0] : null;
+    }
+
+    function bonusSafeCoords(inst) {
+        if (!inst || typeof inst.getCurrentCoordinates !== 'function') return null;
+        const c = inst.getCurrentCoordinates();
+        if (c && inst.htr) c[3] = inst.htr[0];
+        return c;
     }
 
     // Un changement d'avion garde la caméra là où elle était : en vue cockpit
@@ -1862,10 +1888,32 @@
                 const parsed = inst.parseRecord(JSON.stringify(rec));
                 if (!parsed) throw new Error('définition refusée');
                 const coords = bonusCoords();
+                if (!coords) {
+                    // Rien n'est démonté : l'avion en cours reste jouable.
+                    BONUS.loading = false;
+                    updateHUD();
+                    toast('Avion pas encore placé — attends une seconde et réessaie', '#ffce54');
+                    return;
+                }
                 inst.unloadAircraft();
                 inst.fullPath = rec.fullPath;
                 inst.aircraftRecord = rec;
-                inst.init(parsed, coords);
+                try {
+                    inst.init(parsed, coords);
+                } catch (err) {
+                    // Ne jamais laisser un demi-avion : on remet celui d'origine.
+                    warn('init avion bonus', err);
+                    try {
+                        inst.unloadAircraft();
+                        inst.fullPath = BONUS.saved.fullPath;
+                        inst.aircraftRecord = BONUS.saved.record;
+                        inst.init(BONUS.saved.definition, coords);
+                    } catch (e2) { warn('retour avion', e2); }
+                    BONUS.loading = false;
+                    updateHUD();
+                    toast('Modèle indisponible : ' + (err && err.message ? err.message : err), '#ff5a3c');
+                    return;
+                }
                 bonusExteriorView();
                 BONUS.active = true;
                 BONUS.loading = false;
@@ -1885,6 +1933,7 @@
         if (!BONUS.active || !BONUS.saved) return;
         const inst = geofs.aircraft.instance;
         const coords = bonusCoords();
+        if (!coords) { toast('Avion pas encore placé — réessaie', '#ffce54'); return; }
         try {
             inst.unloadAircraft();
             inst.fullPath = BONUS.saved.fullPath;
