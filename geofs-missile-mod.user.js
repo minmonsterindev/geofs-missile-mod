@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.19.9
+// @version      1.20.0
 // @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.19.9';
+    const VERSION = '1.20.0';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1791,11 +1791,12 @@
     // n'est donc plus un calque posé sur un autre avion : c'est le maillage de
     // l'avion lui-même, avec sa physique.
     const BONUS = {
-        base: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31/',
-        // Certains réseaux (FAI, antivirus, poste d'entreprise) bloquent ou
-        // tronquent raw.githubusercontent.com : le même dépôt est servi par un
-        // CDN, essayé si le maillage n'arrive pas.
-        mirror: 'https://cdn.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/',
+        // jsDelivr en premier : c'est le même dépôt GitHub, mais servi par un
+        // CDN avec un cache long. raw.githubusercontent.com n'annonce que 5 min
+        // de cache, si bien que chaque bascule retéléchargeait les 9,4 Mo du
+        // maillage ; c'est aussi le premier bloqué par certains réseaux.
+        base: 'https://cdn.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/',
+        mirror: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31/',
         id: 9917,
         name: 'MiG-31 Foxhound (LEGO)',
         active: false,
@@ -1987,15 +1988,15 @@
                 return bonusTryLoad(inst, BONUS.base);
             })
             .then(ok => {
-                if (ok) return 'GitHub';
-                // Deuxième essai par le CDN : le maillage n'est pas arrivé.
-                BONUS.status = 'maillage absent — second essai par le CDN…';
+                if (ok) return 'CDN';
+                // Deuxième essai depuis GitHub : le maillage n'est pas arrivé.
+                BONUS.status = 'maillage absent — second essai depuis GitHub…';
                 updateHUD();
-                log('maillage absent depuis GitHub, essai du miroir jsDelivr');
+                log('maillage absent depuis le CDN, essai de raw.githubusercontent.com');
                 usedBase = BONUS.mirror;
                 return bonusTryLoad(inst, BONUS.mirror).then(ok2 => {
                     if (!ok2) throw new Error('maillage non affiché');
-                    return 'jsDelivr';
+                    return 'GitHub';
                 });
             })
             .then(source => {
@@ -2010,7 +2011,7 @@
                 BONUS.active = true;
                 bonusExteriorView();
                 updateHUD();
-                toast('MiG-31 LEGO — avion complet chargé' + (source === 'jsDelivr' ? ' (CDN)' : ''), '#39ff88');
+                toast('MiG-31 LEGO — avion complet chargé' + (source === 'GitHub' ? ' (secours GitHub)' : ''), '#39ff88');
                 log('Avion bonus : ' + BONUS.name + ' via geofs.aircraftList (id ' + BONUS.id + ', source ' + source + ')');
             })
             .catch(e => {
@@ -2029,9 +2030,9 @@
                     bonusProbe(BONUS.base + 'mig31-lego.glb'),
                     bonusProbe(BONUS.mirror + 'mig31-lego.glb')
                 ]).then(r => {
-                    BONUS.error = 'GitHub : ' + r[0] + ' · CDN : ' + r[1];
+                    BONUS.error = 'CDN : ' + r[0] + ' · GitHub : ' + r[1];
                     updateHUD();
-                    log('maillage — GitHub : ' + r[0] + ' · jsDelivr : ' + r[1]);
+                    log('maillage — jsDelivr : ' + r[0] + ' · GitHub : ' + r[1]);
                 });
             });
     }
