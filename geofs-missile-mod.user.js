@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.20.2
+// @version      1.20.3
 // @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.20.2';
+    const VERSION = '1.20.3';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1966,6 +1966,20 @@
         });
     }
 
+    // Le GLB ne fait que 1,8 Mo une fois compressé par le CDN, mais le
+    // télécharger au moment de la bascule fait encore attendre sur 4G. Dès que
+    // le joueur a utilisé le MiG une fois, on le remet en cache en tâche de
+    // fond : la bascule suivante n'a plus rien à télécharger.
+    const BONUS_SEEN = 'gmm_mig_seen';
+    function bonusWarmCache() {
+        try { if (localStorage.getItem(BONUS_SEEN) !== '1') return; } catch (e) { return; }
+        setTimeout(() => {
+            if (BONUS.loading) return;
+            bonusPreload(BONUS.base + 'mig31-lego.glb').catch(() =>
+                bonusPreload(BONUS.mirror + 'mig31-lego.glb').catch(() => { }));
+        }, 20000);
+    }
+
     // load() de GeoFS ne rend jamais la main si init() lève : on borne l'attente.
     function bonusWithin(promise, ms, label) {
         return new Promise((resolve, reject) => {
@@ -2038,6 +2052,7 @@
                 inst.fullPath = usedBase;
                 bonusKeepSavedId(savedId);
                 BONUS.active = true;
+                try { localStorage.setItem(BONUS_SEEN, '1'); } catch (e) { }
                 bonusExteriorView();
                 updateHUD();
                 toast('MiG-31 LEGO — avion complet chargé' + (source === 'GitHub' ? ' (secours GitHub)' : ''), '#39ff88');
@@ -2284,6 +2299,7 @@
         S.ready = true;
         S.cal = loadCal();
         bonusCleanStaleId();
+        bonusWarmCache();
         buildUI();
         installKeys();
         // La barre du bas de GeoFS arrive parfois après le script : on réessaie.
