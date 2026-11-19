@@ -141,11 +141,13 @@ voilure, la médiane écartant les trappes de train qui pendent plus bas). Sans 
 se posaient à une fraction de la demi-longueur, donc devant le bord d'attaque très en flèche :
 ils flottaient en l'air à côté de l'aile (corrigé en 1.19.3).
 
-Le chargement de l'avion bonus est aussi protégé (1.19.4) : la position de reprise est
-cherchée dans `getCurrentCoordinates()`, `llaLocation`, le dernier vol sauvegardé puis la
-caméra. Si GeoFS n'a pas encore placé l'avion, rien n'est démonté et un message demande de
-réessayer — avant, `init()` recevait `undefined` et échouait sur « reading '0' », en laissant
-un demi-avion à l'écran (modèle non orienté).
+Le chargement de l'avion bonus passe désormais par le circuit interne de GeoFS (1.19.5) : une
+entrée `local: true` dans `geofs.aircraftList` puis `instance.change(id)`, exactement ce que fait
+le menu « Aircraft ». GeoFS lit lui-même `aircraft.json`, construit les pièces et place l'avion ;
+plus d'`init()` manuel, donc plus de position à fabriquer (les versions 1.19.3–1.19.4 la
+cherchaient à la main et pouvaient la rater : `init()` recevait `undefined` et échouait sur
+« reading '0' », en laissant un demi-avion non orienté). Si l'avion n'est pas encore placé ou si
+GeoFS ne lit pas la définition, rien n'est démonté : l'appareil d'origine reste en place.
 
 **2. Repli** si la pièce trouvée n'est pas crédible — l'aile du F-16 est fondue dans le `body`,
 et sur le Rafale c'est un volet qui est le plus large : 25 cm sous le plan de voilure annoncé par
@@ -232,9 +234,10 @@ brique ne peut pas être fondue dans une grande facette voisine). Les couleurs
 de pièces sont reprises du `.mtl` d'origine — ImageToStl les avait converties
 une seconde fois, ce qui assombrissait tout le modèle — et les 6 décalques
 imprimés gardent leurs UV et leurs textures embarquées dans le GLB ;
-- chargement : `parseRecord()` sur l'enregistrement (`definition` = JSON encodé
-en base64), puis `unloadAircraft()` et `init(définition, coordonnées)`,
-exactement la chaîne employée par Extra Vehicles.
+- chargement : enregistrement dans `geofs.aircraftList` (`{ name, path, local: true }`)
+puis `geofs.aircraft.instance.change(id)`. `load()` va chercher `<path>aircraft.json`,
+`parseRecord()` l'emballe en enregistrement, `init()` construit l'appareil : c'est la
+chaîne du menu « Aircraft » du jeu, utilisée ici au lieu d'un `init()` manuel.
 
 En jeu, la touche **K** (ou le panneau **Armement → Modèle de l'avion**) bascule
 entre l'appareil courant et le MiG-31 : physique, train, caméra cockpit et

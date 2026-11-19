@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.19.4
+// @version      1.19.5
 // @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.19.4';
+    const VERSION = '1.19.5';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1799,34 +1799,24 @@
         saved: null              // avion d'origine, pour pouvoir revenir
     };
 
-    // Position de reprise. `getCurrentCoordinates()` lit `this.llaLocation` et
-    // lève « Cannot read properties of undefined (reading '0') » quand l'avion
-    // n'est pas encore placé (juste après le chargement, après une
-    // réinitialisation de vol…). On garde donc une chaîne de replis : sans ça,
-    // init() recevait « undefined » et laissait un demi-avion à l'écran.
-    function bonusCoords() {
-        const inst = geofs.aircraft.instance;
-        const out = [];
-        const add = c => {
-            if (!c || !isFinite(c[0]) || !isFinite(c[1])) return;
-            if (out.length) return;
-            out.push([c[0], c[1], isFinite(c[2]) ? c[2] : 0, isFinite(c[3]) ? c[3] : 0]);
+    // GeoFS charge un avion en trois temps (instance.load) : une entrée dans
+    // `geofs.aircraftList`, la lecture de `<path>aircraft.json`, puis
+    // `parseRecord()` + `init()`. Avec `local: true`, `load()` lit directement
+    // `<path>aircraft.json` au lieu de passer par load.php. On enregistre donc
+    // le MiG exactement comme un avion du jeu et on laisse GeoFS construire
+    // l'appareil (maillage, pièces, physique, instruments, train) : c'est le
+    // même chemin que le menu « Aircraft », plus aucun init() manuel.
+    function bonusRegister() {
+        if (!window.geofs || !geofs.aircraftList) return false;
+        geofs.aircraftList[BONUS.id] = {
+            name: BONUS.name,
+            dir: '|assets|mig31|',
+            multiplayerFiles: '',
+            community: 0,
+            path: BONUS.base,
+            local: true
         };
-        try { add(bonusSafeCoords(inst)); } catch (e) { }
-        try { add(inst && inst.llaLocation); } catch (e) { }
-        try { add(geofs.lastFlightCoordinates); } catch (e) { }
-        try {
-            const c = geofs.camera && geofs.camera.lla;
-            if (c) add([c[0], c[1], Math.max(0, c[2] || 0), 0]);
-        } catch (e) { }
-        return out.length ? out[0] : null;
-    }
-
-    function bonusSafeCoords(inst) {
-        if (!inst || typeof inst.getCurrentCoordinates !== 'function') return null;
-        const c = inst.getCurrentCoordinates();
-        if (c && inst.htr) c[3] = inst.htr[0];
-        return c;
+        return true;
     }
 
     // Un changement d'avion garde la caméra là où elle était : en vue cockpit
@@ -1848,107 +1838,79 @@
     function bonusLoadModel() {
         if (BONUS.loading || BONUS.active) return;
         const inst = geofs.aircraft.instance;
-        if (!inst || typeof inst.parseRecord !== 'function') {
+        if (!inst || typeof inst.change !== 'function' || !bonusRegister()) {
             toast('GeoFS pas encore prêt', '#ffce54');
             return;
         }
+        const savedId = String(inst.id);
+        const savedPath = inst.fullPath;
         BONUS.loading = true;
         updateHUD();
         toast('Chargement du MiG-31 LEGO…', '#8ef6ff');
 
-        // anti-cache : le CDN de GitHub garde 5 min, ce qui ferait tourner
-        // l'ancienne définition (donc l'ancienne orientation) après un correctif.
-        fetch(BONUS.base + 'aircraft.json?t=' + Date.now(), { cache: 'no-store' })
-            .then(r => {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.text();
-            })
-            .then(txt => {
-                const rec = {
-                    id: BONUS.id,              // remplacé par l'id de l'avion d'origine
-                    name: BONUS.name,
-                    fullPath: BONUS.base,
-                    isPremium: false,
-                    isCommunity: false,
-                    definition: btoa(unescape(encodeURIComponent(txt))),
-                    multiplayerFiles: []
-                };
-                // À sauvegarder AVANT parseRecord(), qui remplace déjà
-                // instance.aircraftRecord par le nouvel avion.
-                if (!BONUS.saved) {
-                    BONUS.saved = {
-                        definition: inst.definition,
-                        record: inst.aircraftRecord,
-                        fullPath: inst.fullPath
-                    };
-                }
-                // GeoFS enregistre le vol avec l'id de l'avion courant : garder
-                // l'id d'origine évite un « could not load aircraft file » au
-                // prochain lancement (9917 n'existe pas côté GeoFS).
-                const savedId = BONUS.saved.record && BONUS.saved.record.id;
-                if (savedId !== undefined && savedId !== null) rec.id = savedId;
-                const parsed = inst.parseRecord(JSON.stringify(rec));
-                if (!parsed) throw new Error('définition refusée');
-                const coords = bonusCoords();
-                if (!coords) {
-                    // Rien n'est démonté : l'avion en cours reste jouable.
-                    BONUS.loading = false;
-                    updateHUD();
-                    toast('Avion pas encore placé — attends une seconde et réessaie', '#ffce54');
-                    return;
-                }
-                inst.unloadAircraft();
-                inst.fullPath = rec.fullPath;
-                inst.aircraftRecord = rec;
-                try {
-                    inst.init(parsed, coords);
-                } catch (err) {
-                    // Ne jamais laisser un demi-avion : on remet celui d'origine.
-                    warn('init avion bonus', err);
-                    try {
-                        inst.unloadAircraft();
-                        inst.fullPath = BONUS.saved.fullPath;
-                        inst.aircraftRecord = BONUS.saved.record;
-                        inst.init(BONUS.saved.definition, coords);
-                    } catch (e2) { warn('retour avion', e2); }
-                    BONUS.loading = false;
-                    updateHUD();
-                    toast('Modèle indisponible : ' + (err && err.message ? err.message : err), '#ff5a3c');
-                    return;
-                }
-                bonusExteriorView();
-                BONUS.active = true;
-                BONUS.loading = false;
+        let req;
+        try {
+            // Même appel que le menu « Aircraft » : GeoFS lit lui-même
+            // <path>aircraft.json, construit les pièces et place l'avion.
+            req = inst.change(BONUS.id);
+        } catch (e) {
+            // getCurrentCoordinates() lit llaLocation : si l'avion n'est pas
+            // encore placé, on s'arrête net sans rien démonter.
+            BONUS.loading = false;
+            updateHUD();
+            warn('changement avion', e);
+            toast('Avion pas encore placé — attends une seconde et réessaie', '#ffce54');
+            return;
+        }
+
+        Promise.resolve(req).then(() => {
+            BONUS.loading = false;
+            // load() retombe sur l'avion par défaut quand la définition ne se
+            // lit pas : on ne garde pas cet état, on revient à l'avion d'avant.
+            if (String(inst.id) !== String(BONUS.id) || !inst.parts || !inst.parts.body) {
                 updateHUD();
-                toast('MiG-31 LEGO — avion complet chargé', '#39ff88');
-                log('Avion bonus : ' + BONUS.name + ' depuis ' + BONUS.base);
-            })
-            .catch(e => {
-                BONUS.loading = false;
-                updateHUD();
-                warn('avion bonus', e);
-                toast('Modèle indisponible : ' + (e && e.message ? e.message : e), '#ff5a3c');
-            });
+                toast('Modèle indisponible — aircraft.json non lu par GeoFS', '#ff5a3c');
+                try { inst.change(savedId); } catch (e) { }
+                return;
+            }
+            BONUS.saved = { id: savedId, fullPath: savedPath };
+            // load() ne met fullPath à jour que pour les avions distants ;
+            // certains accessoires (livrée, cockpit) le lisent encore.
+            inst.fullPath = BONUS.base;
+            BONUS.active = true;
+            bonusExteriorView();
+            updateHUD();
+            toast('MiG-31 LEGO — avion complet chargé', '#39ff88');
+            log('Avion bonus : ' + BONUS.name + ' via geofs.aircraftList (id ' + BONUS.id + ')');
+        }).catch(e => {
+            BONUS.loading = false;
+            updateHUD();
+            warn('avion bonus', e);
+            toast('Modèle indisponible : ' + (e && e.message ? e.message : e), '#ff5a3c');
+            try { inst.change(savedId); } catch (e2) { }
+        });
     }
 
     function bonusRestore() {
         if (!BONUS.active || !BONUS.saved) return;
         const inst = geofs.aircraft.instance;
-        const coords = bonusCoords();
-        if (!coords) { toast('Avion pas encore placé — réessaie', '#ffce54'); return; }
-        try {
-            inst.unloadAircraft();
-            inst.fullPath = BONUS.saved.fullPath;
-            inst.aircraftRecord = BONUS.saved.record;
-            inst.init(BONUS.saved.definition, coords);
-            bonusExteriorView();
+        if (!inst || typeof inst.change !== 'function') return;
+        const saved = BONUS.saved;
+        BONUS.loading = true;
+        updateHUD();
+        Promise.resolve(inst.change(saved.id)).then(() => {
+            inst.fullPath = saved.fullPath;
             BONUS.active = false;
+            BONUS.loading = false;
+            bonusExteriorView();
             updateHUD();
             toast('Avion GeoFS d\'origine', '#39ff88');
-        } catch (e) {
+        }).catch(e => {
+            BONUS.loading = false;
+            updateHUD();
             warn('retour avion', e);
             toast('Impossible de restaurer l\'avion', '#ff5a3c');
-        }
+        });
     }
 
     function toggleBonus() {
