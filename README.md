@@ -149,6 +149,11 @@ cherchaient à la main et pouvaient la rater : `init()` recevait `undefined` et 
 « reading '0' », en laissant un demi-avion non orienté). Si l'avion n'est pas encore placé ou si
 GeoFS ne lit pas la définition, rien n'est démonté : l'appareil d'origine reste en place.
 
+GeoFS range l'avion courant dans `localStorage.flight` et le recharge au démarrage : l'id 9917 du
+MiG y laissait une entrée introuvable, donc un « Could not load aircraft file » au lancement
+suivant (versions 1.19.3–1.19.4). L'id de l'avion d'origine est maintenant réécrit après la
+bascule, et un enregistrement déjà pollué est réparé au chargement du mod.
+
 **2. Repli** si la pièce trouvée n'est pas crédible — l'aile du F-16 est fondue dans le `body`,
 et sur le Rafale c'est un volet qui est le plus large : 25 cm sous le plan de voilure annoncé par
 les `points.forceSourcePoint`, sinon sous le ventre.

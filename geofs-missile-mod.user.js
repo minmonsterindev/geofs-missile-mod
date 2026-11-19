@@ -1819,6 +1819,44 @@
         return true;
     }
 
+    // GeoFS range l'avion courant dans localStorage 'flight' (avec la dernière
+    // position) et le recharge au démarrage. Garder l'id 9917 y laisserait un id
+    // qui n'existe pas hors session : au lancement suivant, GeoFS échoue sur
+    // « Could not load aircraft file » et repart sur l'avion par défaut. On remet
+    // donc l'id de l'avion d'origine, sur l'instance (c'est lui qui est réécrit
+    // ensuite) et dans l'enregistrement déjà écrit.
+    function bonusKeepSavedId(id) {
+        const inst = geofs.aircraft.instance;
+        try { inst.id = id; } catch (e) { }
+        try {
+            const raw = localStorage.getItem('flight');
+            if (!raw) return;
+            const f = JSON.parse(raw);
+            if (!f || String(f.aircraftId) === String(id)) return;
+            f.aircraftId = String(id);
+            localStorage.setItem('flight', JSON.stringify(f));
+        } catch (e) {
+            warn('enregistrement de vol', e);
+        }
+    }
+
+    // Répare un enregistrement laissé par une version précédente (1.19.3 et
+    // 1.19.4 y sauvegardaient l'id 9917) : sans ça, le jeu affiche l'erreur à
+    // chaque démarrage.
+    function bonusCleanStaleId() {
+        try {
+            const raw = localStorage.getItem('flight');
+            if (!raw) return;
+            const f = JSON.parse(raw);
+            if (!f || String(f.aircraftId) !== String(BONUS.id)) return;
+            f.aircraftId = String(geofs.aircraft.default);
+            localStorage.setItem('flight', JSON.stringify(f));
+            log('enregistrement de vol : id ' + BONUS.id + ' inconnu → avion par défaut');
+        } catch (e) {
+            warn('enregistrement de vol', e);
+        }
+    }
+
     // Un changement d'avion garde la caméra là où elle était : en vue cockpit
     // on arrive dans le fuselage, et la vue « chase » y reste collée tant que
     // l'avion ne bouge pas. On repart donc d'une vue extérieure cadrée.
@@ -1877,6 +1915,7 @@
             // load() ne met fullPath à jour que pour les avions distants ;
             // certains accessoires (livrée, cockpit) le lisent encore.
             inst.fullPath = BONUS.base;
+            bonusKeepSavedId(savedId);
             BONUS.active = true;
             bonusExteriorView();
             updateHUD();
@@ -1898,7 +1937,7 @@
         const saved = BONUS.saved;
         BONUS.loading = true;
         updateHUD();
-        Promise.resolve(inst.change(saved.id)).then(() => {
+        Promise.resolve(inst.change(saved.id, undefined, true)).then(() => {
             inst.fullPath = saved.fullPath;
             BONUS.active = false;
             BONUS.loading = false;
@@ -2107,6 +2146,7 @@
         if (S.ready) return;
         S.ready = true;
         S.cal = loadCal();
+        bonusCleanStaleId();
         buildUI();
         installKeys();
         // La barre du bas de GeoFS arrive parfois après le script : on réessaie.
