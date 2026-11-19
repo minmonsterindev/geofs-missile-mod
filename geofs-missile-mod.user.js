@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.20.0
+// @version      1.20.1
 // @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.20.0';
+    const VERSION = '1.20.1';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1837,27 +1837,36 @@
         return !!(o && o.model && o.model._model);
     }
 
-    function bonusWaitMesh(inst, ms) {
+    // Cesium construit les 1183 primitives du GLB : sur une machine modeste
+    // cela prend des dizaines de secondes, sans le moindre signe. On attend
+    // donc en affichant un compteur plutôt que de relancer un téléchargement.
+    function bonusWaitMesh(inst, ms, onTick) {
         const t0 = performance.now();
         return new Promise(resolve => {
             const step = () => {
                 if (bonusMeshReady(inst)) return resolve(true);
+                const s = Math.round((performance.now() - t0) / 1000);
                 if (performance.now() - t0 > ms) return resolve(false);
-                setTimeout(step, 400);
+                // GeoFS est retombé sur un autre avion : inutile d'attendre.
+                if (String(inst.id) !== String(BONUS.id)) return resolve(false);
+                if (onTick) { try { onTick(s); } catch (e) { } }
+                setTimeout(step, 500);
             };
             step();
         });
     }
 
-    // Charge l'avion depuis `base` et dit si le maillage est réellement affiché.
-    function bonusTryLoad(inst, base) {
-        if (!bonusRegister(base)) return Promise.resolve(false);
+    // Charge l'avion depuis `base`.
+    //   def : la définition a bien été construite par GeoFS (id 9917)
+    //   ok  : le maillage est réellement affiché
+    function bonusTryLoad(inst, base, onTick) {
+        if (!bonusRegister(base)) return Promise.resolve({ def: false, ok: false });
         return bonusWithin(inst.change(BONUS.id, undefined, true), 60000, 'construction du MiG-31')
             .then(() => {
-                if (String(inst.id) !== String(BONUS.id)) return false;   // repli GeoFS
-                return bonusWaitMesh(inst, 12000);
+                if (String(inst.id) !== String(BONUS.id)) return { def: false, ok: false };
+                return bonusWaitMesh(inst, 90000, onTick).then(ok => ({ def: true, ok: ok }));
             })
-            .catch(e => { warn('essai ' + base, e); return false; });
+            .catch(e => { warn('essai ' + base, e); return { def: false, ok: false }; });
     }
 
     // Pour le message d'erreur : le fichier est-il seulement accessible ?
@@ -1979,23 +1988,31 @@
         // précharger le ferait descendre deux fois, Cesium ne relisant pas
         // le cache du navigateur.
         let usedBase = BONUS.base;
+        const tick = s => {
+            if (s >= 8) {                 // au-delà de 8 s, on explique l'attente
+                BONUS.status = 'maillage en construction… ' + s + ' s';
+                updateHUD();
+            }
+        };
         bonusWithin(bonusPreload(BONUS.base + 'aircraft.json'), 15000, 'définition du MiG-31')
             .then(() => {
                 BONUS.status = 'téléchargement du maillage et construction…';
                 updateHUD();
                 // Même appel que le menu « Aircraft » : GeoFS lit lui-même
                 // <path>aircraft.json, construit les pièces et place l'avion.
-                return bonusTryLoad(inst, BONUS.base);
+                return bonusTryLoad(inst, BONUS.base, tick);
             })
-            .then(ok => {
-                if (ok) return 'CDN';
-                // Deuxième essai depuis GitHub : le maillage n'est pas arrivé.
-                BONUS.status = 'maillage absent — second essai depuis GitHub…';
+            .then(res => {
+                if (res.ok) return 'CDN';
+                // Si la définition est bonne et que seul le maillage traîne,
+                // recharger ne ferait que retélécharger 9,4 Mo : on s'arrête.
+                if (res.def) throw new Error('maillage non affiché');
+                BONUS.status = 'définition refusée — second essai depuis GitHub…';
                 updateHUD();
-                log('maillage absent depuis le CDN, essai de raw.githubusercontent.com');
+                log('définition refusée depuis le CDN, essai de raw.githubusercontent.com');
                 usedBase = BONUS.mirror;
-                return bonusTryLoad(inst, BONUS.mirror).then(ok2 => {
-                    if (!ok2) throw new Error('maillage non affiché');
+                return bonusTryLoad(inst, BONUS.mirror, tick).then(r2 => {
+                    if (!r2.ok) throw new Error(r2.def ? 'maillage non affiché' : 'définition refusée');
                     return 'GitHub';
                 });
             })
