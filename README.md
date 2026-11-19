@@ -169,6 +169,26 @@ réessaie depuis GitHub que si la définition elle-même n'a pas été lue. En c
 d'origine revient et le panneau garde une ligne rouge indiquant si le fichier répond sur le
 CDN et sur GitHub.
 
+Le contrôle du maillage regarde le bon modèle (1.20.2) : juste après une bascule, l'objet 3D
+porte encore quelques instants le GLB de l'avion quitté. On vérifie donc l'URL du GLB, l'état
+`ready` de Cesium et la sphère englobante (13,7 m pour le MiG), pas la seule présence d'un
+modèle.
+
+Dès que le joueur a utilisé le MiG une fois, le GLB est remis en cache en tâche de fond 20 s
+après le démarrage (1.20.3) : la bascule suivante ne télécharge plus rien et le maillage est
+prêt en quelques secondes. Rien n'est téléchargé pour qui n'utilise jamais l'avion.
+
+## Poids du maillage
+
+Le GLB fait 8,96 Mo mais jsDelivr le sert compressé en **1,83 Mo** (mesuré sur les en-têtes),
+soit 3 à 5 s en 4G ; `raw.githubusercontent.com` livre les 9,4 Mo bruts, d'où jsDelivr en
+première source. Les pistes d'allègement ont été mesurées : la soudure des sommets ne gagne
+que 30 Ko une fois compressé (310 000 sommets à normales par face, aucune arête partagée) et
+la quantification (`KHR_mesh_quantization`, 5,68 Mo, 0,93 Mo compressé) a été écartée après
+test : Cesium 1.96 de GeoFS lit la géométrie mais ne marque jamais le modèle prêt, donc avion
+invisible. Fusionner les briques par matériau (1 183 primitives → 15) accélérerait la
+construction mais casserait le calcul des points d'emport planche par planche sous les ailes.
+
 GeoFS range l'avion courant dans `localStorage.flight` et le recharge au démarrage : l'id 9917 du
 MiG y laissait une entrée introuvable, donc un « Could not load aircraft file » au lancement
 suivant (versions 1.19.3–1.19.4). L'id de l'avion d'origine est maintenant réécrit après la
