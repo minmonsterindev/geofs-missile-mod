@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.19.7
+// @version      1.19.8
 // @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.19.7';
+    const VERSION = '1.19.8';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1792,6 +1792,10 @@
     // l'avion lui-même, avec sa physique.
     const BONUS = {
         base: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31/',
+        // Certains réseaux (FAI, antivirus, poste d'entreprise) bloquent ou
+        // tronquent raw.githubusercontent.com : le même dépôt est servi par un
+        // CDN, essayé si le maillage n'arrive pas.
+        mirror: 'https://cdn.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/',
         id: 9917,
         name: 'MiG-31 Foxhound (LEGO)',
         active: false,
@@ -1807,17 +1811,60 @@
     // le MiG exactement comme un avion du jeu et on laisse GeoFS construire
     // l'appareil (maillage, pièces, physique, instruments, train) : c'est le
     // même chemin que le menu « Aircraft », plus aucun init() manuel.
-    function bonusRegister() {
+    function bonusRegister(base) {
         if (!window.geofs || !geofs.aircraftList) return false;
         geofs.aircraftList[BONUS.id] = {
             name: BONUS.name,
             dir: '|assets|mig31|',
             multiplayerFiles: '',
             community: 0,
-            path: BONUS.base,
+            path: base || BONUS.base,
             local: true
         };
         return true;
+    }
+
+    // `parts.body` existe dès que la définition est lue, même si le .glb n'est
+    // jamais arrivé : on se retrouvait avec un avion invisible autour duquel les
+    // missiles flottaient. On attend donc le vrai maillage Cesium.
+    function bonusMeshReady(inst) {
+        // L'identité compte aussi : quand la définition ne se lit pas, GeoFS
+        // retombe sur l'avion par défaut, dont le maillage existe bel et bien.
+        if (!inst || String(inst.id) !== String(BONUS.id)) return false;
+        const o = inst.parts && inst.parts.body && inst.parts.body.object3d;
+        return !!(o && o.model && o.model._model);
+    }
+
+    function bonusWaitMesh(inst, ms) {
+        const t0 = performance.now();
+        return new Promise(resolve => {
+            const step = () => {
+                if (bonusMeshReady(inst)) return resolve(true);
+                if (performance.now() - t0 > ms) return resolve(false);
+                setTimeout(step, 400);
+            };
+            step();
+        });
+    }
+
+    // Charge l'avion depuis `base` et dit si le maillage est réellement affiché.
+    function bonusTryLoad(inst, base) {
+        if (!bonusRegister(base)) return Promise.resolve(false);
+        return bonusWithin(inst.change(BONUS.id, undefined, true), 60000, 'construction du MiG-31')
+            .then(() => {
+                if (String(inst.id) !== String(BONUS.id)) return false;   // repli GeoFS
+                return bonusWaitMesh(inst, 12000);
+            })
+            .catch(e => { warn('essai ' + base, e); return false; });
+    }
+
+    // Pour le message d'erreur : le fichier est-il seulement accessible ?
+    function bonusProbe(url) {
+        return fetch(url, { cache: 'no-store' }).then(r => {
+            if (!r.ok) return 'HTTP ' + r.status;
+            const len = parseInt(r.headers.get('content-length') || '0', 10);
+            return len ? 'fichier accessible (' + (len / 1048576).toFixed(1) + ' Mo)' : 'fichier accessible';
+        }).catch(() => 'réseau bloqué');
     }
 
     // GeoFS range l'avion courant dans localStorage 'flight' (avec la dernière
@@ -1909,7 +1956,7 @@
     function bonusLoadModel() {
         if (BONUS.loading || BONUS.active) return;
         const inst = geofs.aircraft.instance;
-        if (!inst || typeof inst.change !== 'function' || !bonusRegister()) {
+        if (!inst || typeof inst.change !== 'function' || !bonusRegister(BONUS.base)) {
             toast('GeoFS pas encore prêt', '#ffce54');
             return;
         }
@@ -1927,46 +1974,54 @@
         // pas ; le maillage reste téléchargé par GeoFS, une seule fois — le
         // précharger le ferait descendre deux fois, Cesium ne relisant pas
         // le cache du navigateur.
+        let usedBase = BONUS.base;
         bonusWithin(bonusPreload(BONUS.base + 'aircraft.json'), 15000, 'définition du MiG-31')
             .then(() => {
                 BONUS.status = 'téléchargement du maillage et construction…';
                 updateHUD();
                 // Même appel que le menu « Aircraft » : GeoFS lit lui-même
                 // <path>aircraft.json, construit les pièces et place l'avion.
-                return bonusWithin(inst.change(BONUS.id), 60000, 'construction du MiG-31');
+                return bonusTryLoad(inst, BONUS.base);
             })
-            .then(() => {
-            BONUS.loading = false;
-            BONUS.status = '';
-            // load() retombe sur l'avion par défaut quand la définition ne se
-            // lit pas : on ne garde pas cet état, on revient à l'avion d'avant.
-            if (String(inst.id) !== String(BONUS.id) || !inst.parts || !inst.parts.body) {
+            .then(ok => {
+                if (ok) return 'GitHub';
+                // Deuxième essai par le CDN : le maillage n'est pas arrivé.
+                BONUS.status = 'maillage absent — second essai par le CDN…';
                 updateHUD();
-                toast('Modèle indisponible — aircraft.json non lu par GeoFS', '#ff5a3c');
+                log('maillage absent depuis GitHub, essai du miroir jsDelivr');
+                usedBase = BONUS.mirror;
+                return bonusTryLoad(inst, BONUS.mirror).then(ok2 => {
+                    if (!ok2) throw new Error('maillage non affiché');
+                    return 'jsDelivr';
+                });
+            })
+            .then(source => {
+                BONUS.loading = false;
+                BONUS.status = '';
+                BONUS.saved = { id: savedId, fullPath: savedPath };
+                // load() ne met fullPath à jour que pour les avions distants ;
+                // certains accessoires (livrée, cockpit) le lisent encore.
+                inst.fullPath = usedBase;
+                bonusKeepSavedId(savedId);
+                BONUS.active = true;
+                bonusExteriorView();
+                updateHUD();
+                toast('MiG-31 LEGO — avion complet chargé' + (source === 'jsDelivr' ? ' (CDN)' : ''), '#39ff88');
+                log('Avion bonus : ' + BONUS.name + ' via geofs.aircraftList (id ' + BONUS.id + ', source ' + source + ')');
+            })
+            .catch(e => {
+                BONUS.loading = false;
+                BONUS.status = '';
+                updateHUD();
+                warn('avion bonus', e);
+                // Ne jamais laisser un avion invisible : on remet celui d'avant.
                 try { geofs.doPause(0); } catch (e0) { }
-                try { inst.change(savedId, undefined, true); } catch (e) { }
-                return;
-            }
-            BONUS.saved = { id: savedId, fullPath: savedPath };
-            // load() ne met fullPath à jour que pour les avions distants ;
-            // certains accessoires (livrée, cockpit) le lisent encore.
-            inst.fullPath = BONUS.base;
-            bonusKeepSavedId(savedId);
-            BONUS.active = true;
-            bonusExteriorView();
-            updateHUD();
-            toast('MiG-31 LEGO — avion complet chargé', '#39ff88');
-            log('Avion bonus : ' + BONUS.name + ' via geofs.aircraftList (id ' + BONUS.id + ')');
-        }).catch(e => {
-            BONUS.loading = false;
-            BONUS.status = '';
-            updateHUD();
-            warn('avion bonus', e);
-            toast('MiG-31 indisponible : ' + (e && e.message ? e.message : e), '#ff5a3c');
-            // Ne jamais laisser le jeu figé en pause sur un chargement raté.
-            try { geofs.doPause(0); } catch (e0) { }
-            try { if (String(inst.id) === String(BONUS.id)) inst.change(savedId, undefined, true); } catch (e2) { }
-        });
+                try { if (String(inst.id) === String(BONUS.id)) inst.change(savedId, undefined, true); } catch (e2) { }
+                bonusProbe(BONUS.base + 'mig31-lego.glb').then(state => {
+                    toast('MiG-31 non chargé — maillage : ' + state, '#ff5a3c');
+                    log('maillage : ' + state + ' (GitHub puis jsDelivr)');
+                });
+            });
     }
 
     function bonusRestore() {
