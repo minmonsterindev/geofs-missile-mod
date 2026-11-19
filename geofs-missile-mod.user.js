@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.19.8
+// @version      1.19.9
 // @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.19.8';
+    const VERSION = '1.19.9';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1801,6 +1801,7 @@
         active: false,
         loading: false,
         status: '',               // texte de progression affiché dans le panneau
+        error: '',                // dernier échec, gardé visible dans le panneau
         saved: null              // avion d'origine, pour pouvoir revenir
     };
 
@@ -1859,12 +1860,13 @@
     }
 
     // Pour le message d'erreur : le fichier est-il seulement accessible ?
+    // HEAD : on veut le code et la taille, pas les 9,4 Mo.
     function bonusProbe(url) {
-        return fetch(url, { cache: 'no-store' }).then(r => {
+        return fetch(url, { method: 'HEAD', cache: 'no-store' }).then(r => {
             if (!r.ok) return 'HTTP ' + r.status;
             const len = parseInt(r.headers.get('content-length') || '0', 10);
-            return len ? 'fichier accessible (' + (len / 1048576).toFixed(1) + ' Mo)' : 'fichier accessible';
-        }).catch(() => 'réseau bloqué');
+            return len ? 'OK ' + (len / 1048576).toFixed(1) + ' Mo' : 'OK';
+        }).catch(() => 'bloqué');
     }
 
     // GeoFS range l'avion courant dans localStorage 'flight' (avec la dernière
@@ -1963,6 +1965,7 @@
         const savedId = String(inst.id);
         const savedPath = inst.fullPath;
         BONUS.loading = true;
+        BONUS.error = '';
         BONUS.status = 'téléchargement de la définition…';
         updateHUD();
         toast('Chargement du MiG-31 LEGO…', '#8ef6ff');
@@ -1998,6 +2001,7 @@
             .then(source => {
                 BONUS.loading = false;
                 BONUS.status = '';
+                BONUS.error = '';
                 BONUS.saved = { id: savedId, fullPath: savedPath };
                 // load() ne met fullPath à jour que pour les avions distants ;
                 // certains accessoires (livrée, cockpit) le lisent encore.
@@ -2012,14 +2016,22 @@
             .catch(e => {
                 BONUS.loading = false;
                 BONUS.status = '';
+                const msg = (e && e.message) || String(e);
+                BONUS.error = 'échec : ' + msg;
                 updateHUD();
                 warn('avion bonus', e);
                 // Ne jamais laisser un avion invisible : on remet celui d'avant.
                 try { geofs.doPause(0); } catch (e0) { }
                 try { if (String(inst.id) === String(BONUS.id)) inst.change(savedId, undefined, true); } catch (e2) { }
-                bonusProbe(BONUS.base + 'mig31-lego.glb').then(state => {
-                    toast('MiG-31 non chargé — maillage : ' + state, '#ff5a3c');
-                    log('maillage : ' + state + ' (GitHub puis jsDelivr)');
+                toast('MiG-31 non chargé — ' + msg, '#ff5a3c');
+                // Diagnostic : le fichier est-il joignable sur les deux sources ?
+                Promise.all([
+                    bonusProbe(BONUS.base + 'mig31-lego.glb'),
+                    bonusProbe(BONUS.mirror + 'mig31-lego.glb')
+                ]).then(r => {
+                    BONUS.error = 'GitHub : ' + r[0] + ' · CDN : ' + r[1];
+                    updateHUD();
+                    log('maillage — GitHub : ' + r[0] + ' · jsDelivr : ' + r[1]);
                 });
             });
     }
@@ -2112,8 +2124,9 @@
             '</span></div>');
         h.push('<div class="row"><span class="dim">' +
             (BONUS.loading ? (BONUS.status || 'chargement…')
-                : (BONUS.active ? 'avion complet · physique et train dédiés'
-                    : 'avion d\'origine')) + '</span></div>');
+                : (BONUS.error ? '<span style="color:#ff5a3c">' + BONUS.error + '</span>'
+                    : (BONUS.active ? 'avion complet · physique et train dédiés'
+                        : 'avion d\'origine'))) + '</span></div>');
 
         h.push('<div class="sep"></div>');
         h.push('<div class="dim">' + keyLabel(CFG.keys.arm) + ' armer · ' + keyLabel(CFG.keys.fire) + ' tirer · ' +
