@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.19.6
+// @version      1.19.7
 // @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.19.6';
+    const VERSION = '1.19.7';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1797,7 +1797,6 @@
         active: false,
         loading: false,
         status: '',               // texte de progression affiché dans le panneau
-        model: 'mig31-lego.glb',
         saved: null              // avion d'origine, pour pouvoir revenir
     };
 
@@ -1921,33 +1920,20 @@
         updateHUD();
         toast('Chargement du MiG-31 LEGO…', '#8ef6ff');
 
-        // GeoFS met le jeu en pause pendant qu'il télécharge la définition et le
-        // maillage : sur une petite connexion l'écran reste figé des dizaines de
-        // secondes sans le moindre signe, on croit que ça ne charge pas. On
-        // télécharge donc les deux fichiers nous-mêmes, avec le pourcentage ;
-        // GeoFS les relit ensuite dans le cache HTTP du navigateur.
-        let lastPct = -1;
-        const progress = (got, total) => {
-            const p = Math.floor(got * 100 / total);
-            if (p === lastPct) return;
-            lastPct = p;
-            BONUS.status = 'maillage ' + p + ' % · ' + (got / 1048576).toFixed(1) +
-                ' / ' + (total / 1048576).toFixed(1) + ' Mo';
-            updateHUD();
-        };
-
-        bonusPreload(BONUS.base + 'aircraft.json')
+        // GeoFS met le jeu en pause pendant le chargement et n'affiche rien :
+        // sur une petite connexion l'écran reste figé, on croit que ça ne
+        // charge pas. On lit d'abord la définition nous-mêmes (16 Ko) pour
+        // échouer tout de suite et avec un message clair si GitHub ne répond
+        // pas ; le maillage reste téléchargé par GeoFS, une seule fois — le
+        // précharger le ferait descendre deux fois, Cesium ne relisant pas
+        // le cache du navigateur.
+        bonusWithin(bonusPreload(BONUS.base + 'aircraft.json'), 15000, 'définition du MiG-31')
             .then(() => {
-                BONUS.status = 'téléchargement du maillage…';
-                updateHUD();
-                return bonusPreload(BONUS.base + BONUS.model, progress);
-            })
-            .then(() => {
-                BONUS.status = 'construction par GeoFS…';
+                BONUS.status = 'téléchargement du maillage et construction…';
                 updateHUD();
                 // Même appel que le menu « Aircraft » : GeoFS lit lui-même
                 // <path>aircraft.json, construit les pièces et place l'avion.
-                return bonusWithin(inst.change(BONUS.id), 30000, 'construction du MiG-31');
+                return bonusWithin(inst.change(BONUS.id), 60000, 'construction du MiG-31');
             })
             .then(() => {
             BONUS.loading = false;
