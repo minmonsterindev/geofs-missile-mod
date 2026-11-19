@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.20.1
+// @version      1.20.2
 // @updated      2026-11-18
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.20.1';
+    const VERSION = '1.20.2';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1834,7 +1834,19 @@
         // retombe sur l'avion par défaut, dont le maillage existe bel et bien.
         if (!inst || String(inst.id) !== String(BONUS.id)) return false;
         const o = inst.parts && inst.parts.body && inst.parts.body.object3d;
-        return !!(o && o.model && o.model._model);
+        const mdl = o && o.model;
+        const m = mdl && mdl._model;
+        if (!mdl || !m) return false;
+        // Juste après une bascule, l'objet 3D porte encore le modèle de l'avion
+        // précédent : seul un GLB du MiG prouve que le bon maillage est là.
+        const url = String((m._resource && m._resource.url) || m._url || '');
+        if (!/mig31/i.test(url)) return false;
+        // Cesium marque le modèle prêt quand les sommets et la sphère
+        // englobante sont chargés — c'est le maillage, pas la définition.
+        if (mdl.ready !== true) return false;
+        const bs = m._boundingSphere || mdl.boundingSphere;
+        const r = bs && bs.radius;
+        return !!(r && r > 2 && r < 200);
     }
 
     // Cesium construit les 1183 primitives du GLB : sur une machine modeste
