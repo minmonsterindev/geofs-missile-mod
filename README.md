@@ -156,6 +156,12 @@ la construction par GeoFS est limitée à 60 s. Le panneau affiche l'étape en c
 route sur l'avion d'origine au lieu de rester figé en pause. Le maillage (9,4 Mo) n'est
 volontairement pas préchargé : GeoFS le redemanderait, ce qui doublerait le téléchargement.
 
+Le mod vérifie aussi que le **maillage** est réellement affiché (1.19.8) : GeoFS construit la
+définition même quand le `.glb` n'arrive pas, ce qui donnait un avion invisible entouré des
+seuls emports. Le maillage Cesium est attendu 12 s, un second essai passe par le CDN jsDelivr
+(si `raw.githubusercontent.com` est bloqué ou tronqué par le réseau), puis l'avion d'origine
+est remis avec un message indiquant l'état du fichier.
+
 GeoFS range l'avion courant dans `localStorage.flight` et le recharge au démarrage : l'id 9917 du
 MiG y laissait une entrée introuvable, donc un « Could not load aircraft file » au lancement
 suivant (versions 1.19.3–1.19.4). L'id de l'avion d'origine est maintenant réécrit après la
