@@ -158,9 +158,16 @@ volontairement pas préchargé : GeoFS le redemanderait, ce qui doublerait le t�
 
 Le mod vérifie aussi que le **maillage** est réellement affiché (1.19.8) : GeoFS construit la
 définition même quand le `.glb` n'arrive pas, ce qui donnait un avion invisible entouré des
-seuls emports. Le maillage Cesium est attendu 12 s, un second essai passe par le CDN jsDelivr
-(si `raw.githubusercontent.com` est bloqué ou tronqué par le réseau), puis l'avion d'origine
-est remis avec un message indiquant l'état du fichier.
+seuls emports. Le maillage est désormais servi par **jsDelivr** en priorité (même dépôt, cache
+long : la deuxième bascule prend ~1 s au lieu de retélécharger 9,4 Mo), GitHub restant en
+secours.
+
+Cesium construit les 1183 primitives du GLB en plusieurs secondes : le mod attend jusqu'à 90 s
+en affichant `maillage en construction… N s` (1.20.1). Il ne relance plus un second
+téléchargement quand seul le maillage traîne — c'est ce qui bloquait le chargement — et ne
+réessaie depuis GitHub que si la définition elle-même n'a pas été lue. En cas d'échec, l'avion
+d'origine revient et le panneau garde une ligne rouge indiquant si le fichier répond sur le
+CDN et sur GitHub.
 
 GeoFS range l'avion courant dans `localStorage.flight` et le recharge au démarrage : l'id 9917 du
 MiG y laissait une entrée introuvable, donc un « Could not load aircraft file » au lancement
