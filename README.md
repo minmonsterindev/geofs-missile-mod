@@ -149,6 +149,13 @@ cherchaient à la main et pouvaient la rater : `init()` recevait `undefined` et 
 « reading '0' », en laissant un demi-avion non orienté). Si l'avion n'est pas encore placé ou si
 GeoFS ne lit pas la définition, rien n'est démonté : l'appareil d'origine reste en place.
 
+Le chargement est aussi borné (1.19.6–1.19.7) : la définition (16 Ko) est lue d'abord, avec
+un délai de 15 s, pour échouer tout de suite avec un message clair si GitHub ne répond pas ;
+la construction par GeoFS est limitée à 60 s. Le panneau affiche l'étape en cours
+(« téléchargement… », « construction par GeoFS… ») et, en cas d'échec, le jeu est remis en
+route sur l'avion d'origine au lieu de rester figé en pause. Le maillage (9,4 Mo) n'est
+volontairement pas préchargé : GeoFS le redemanderait, ce qui doublerait le téléchargement.
+
 GeoFS range l'avion courant dans `localStorage.flight` et le recharge au démarrage : l'id 9917 du
 MiG y laissait une entrée introuvable, donc un « Could not load aircraft file » au lancement
 suivant (versions 1.19.3–1.19.4). L'id de l'avion d'origine est maintenant réécrit après la
