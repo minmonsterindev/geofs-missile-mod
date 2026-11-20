@@ -209,6 +209,19 @@ rotation de 90° (principaux) et −110° (nez) sur `gearPosition`, avec dispari
 
 Le maillage du corps perd 1 700 triangles (les trains), et `mig31-lego.glb` n'est plus utilisé.
 
+## Anti-lag et train (1.22.1)
+
+- **HUD et panneau** : leur texte est construit à chaque mise à jour mais le DOM n'est
+  réécrit **que s'il change** (`HUD.sig`, `HUD.panelSig`). Avant, deux `innerHTML` complets
+  étaient réécrits cinq fois par seconde, ce qui provoquait un reflow permanent — c'était la
+  cause principale du lag. Les rafraîchissements passent aussi de 5 à 2 par seconde.
+- **Effets** (fumée, explosions) : mis à jour une image sur deux au-delà de deux particules,
+  au lieu de recréer deux propriétés Cesium par particule à chaque image.
+- **Contacts** relus toutes les 500 ms au lieu de 200.
+- **Train avant** : le braquage permanent (`yaw`, 30°) a été retiré — c'est lui qui faisait
+  partir l'avion en cercle vers la gauche. Le train avant se replie maintenant dans le **même
+  sens** que les trains principaux (+110° au lieu de −110°).
+
 ## Décollage et vol (1.22.0)
 
 L'avion restait collé au sol pour trois raisons, toutes dans la définition et non dans le

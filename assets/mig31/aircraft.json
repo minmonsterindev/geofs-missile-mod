@@ -520,15 +520,9 @@
     "animations": [
      {
       "type": "rotate",
-      "axis": "Z",
-      "value": "yaw",
-      "ratio": 30
-     },
-     {
-      "type": "rotate",
       "axis": "X",
       "value": "gearPosition",
-      "ratio": -110
+      "ratio": 110
      },
      {
       "type": "hide",

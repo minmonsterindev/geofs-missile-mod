@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.22.0
+// @version      1.22.1
 // @updated      2026-11-20
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.22.0';
+    const VERSION = '1.22.1';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1628,7 +1628,12 @@
         } catch (e) { warn('explosion', e); }
     }
 
+    let fxFrame = 0;
     function updateFx(dt) {
+        if (!S.fx.length) return;
+        // Un effet sur deux images suffit largement à l'œil, et évite de
+        // recréer deux propriétés Cesium par particule à chaque image.
+        if ((fxFrame++ & 1) && S.fx.length > 2) return;
         const Cesium = C();
         const v = viewer();
         for (let i = S.fx.length - 1; i >= 0; i--) {
@@ -1656,6 +1661,9 @@
     }
 
     /* ============================== HUD MAJ ============================= */
+
+    // Signatures des derniers contenus écrits dans le DOM (anti-lag).
+    const HUD = { sig: '', panelSig: '' };
 
     function updateHUD() {
         if (!S.ui || !S.ready) return;
@@ -1696,7 +1704,7 @@
                 '<br>² avancer · , reculer · ) ( écartement · ] [ hauteur · Retour arrière = reset</div>';
         }
 
-        S.ui.hud.innerHTML =
+        const html =
             '<b>◈ SYSTÈME D\'ARMEMENT</b> &nbsp;' + stateLine + '<br>' +
             'Avion &nbsp;&nbsp;&nbsp;: <span class="v">' + name + '</span><br>' +
             loadLine + '<br>' +
@@ -1714,6 +1722,13 @@
             '[' + keyLabel(CFG.keys.calibrate) + '] calibrage &nbsp; ' +
             '[' + keyLabel(CFG.keys.bonus) + '] LEGO &nbsp; ' +
             '</div>';
+        // Réécrire le HUD à chaque image coûtait un reflow complet plusieurs
+        // fois par seconde (source du lag chez certains joueurs). On construit
+        // le texte, et on ne touche au DOM que s'il a changé.
+        if (html !== HUD.sig) {
+            HUD.sig = html;
+            S.ui.hud.innerHTML = html;
+        }
         if (S.panelOpen) renderPanel();
     }
 
@@ -1773,12 +1788,12 @@
         try {
             checkAircraft();
             retryWingBox();
-            if (now - S.contactsAt > 200) refreshContacts();
+            if (now - S.contactsAt > 500) refreshContacts();
             updateMissiles(dt);
             updateBombs(dt);
             updateFx(dt);
             updateLock();
-            if (now - S.hudAt > 200) { S.hudAt = now; updateHUD(); }
+            if (now - S.hudAt > 500) { S.hudAt = now; updateHUD(); }
         } catch (e) {
             warn('tick', e);
         }
@@ -2353,7 +2368,11 @@
         h.push('<div class="dim">' + keyLabel(CFG.keys.arm) + ' armer · ' + keyLabel(CFG.keys.fire) + ' tirer · ' +
             keyLabel(CFG.keys.type) + ' type · ' + keyLabel(CFG.keys.bomb[0]) + ' bombe · ' +
             keyLabel(CFG.keys.reload) + ' réarmer</div>');
-        S.ui.panel.innerHTML = h.join('');
+        const txt = h.join('');
+        if (txt !== HUD.panelSig) {
+            HUD.panelSig = txt;
+            S.ui.panel.innerHTML = txt;
+        }
     }
 
     /* ============================== TOUCHES ============================ */
