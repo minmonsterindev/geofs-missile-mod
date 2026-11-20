@@ -178,6 +178,19 @@ Dès que le joueur a utilisé le MiG une fois, le GLB est remis en cache en tâc
 après le démarrage (1.20.3) : la bascule suivante ne télécharge plus rien et le maillage est
 prêt en quelques secondes. Rien n'est téléchargé pour qui n'utilise jamais l'avion.
 
+« définition refusée » venait de GeoFS, pas du fichier (1.20.4) : le jeu lit lui-même
+`aircraft.json` avec `$.ajax`, et sur un réseau filtré (école, proxy) cette requête échoue même
+quand celle du mod passe — le préchargement lisait une réponse déjà en cache. GeoFS appelait
+alors `loadDefault('Could not load aircraft file')`, d'où le message. Le mod télécharge
+désormais la définition lui-même (`cache: 'no-store'`, JSON vérifié : une page de blocage
+renvoyée en 200 est détectée) et la remet à GeoFS au moment où il la demande. Les sources sont
+essayées dans l'ordre — `cdn`, `fastly` et `gcore.jsdelivr.net`, GitHub, GitHack, Statically —
+chacune n'étant tentée que si sa définition arrive vraiment, et le repli est annoncé
+(`secours Fastly`). Si aucune ne répond : « sources injoignables (réseau filtré ?) » en quelques
+secondes, retour à l'avion d'origine, aucune boucle. Enfin, l'attente ne dépend plus de la
+promesse de `change()` : GeoFS peut lever dans `init()` (caméra pas encore prête) après avoir
+déjà posé l'avion, et cette promesse ne se résout alors jamais — c'est l'id 9917 qui fait foi.
+
 ## Poids du maillage
 
 Le GLB fait 8,96 Mo mais jsDelivr le sert compressé en **1,83 Mo** (mesuré sur les en-têtes),

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.20.3
-// @updated      2026-11-18
+// @version      1.20.4
+// @updated      2026-11-20
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
 // @updateURL    https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/geofs-missile-mod.user.js
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.20.3';
+    const VERSION = '1.20.4';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1797,6 +1797,18 @@
         // maillage ; c'est aussi le premier bloqué par certains réseaux.
         base: 'https://cdn.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/',
         mirror: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31/',
+        // Sources essayées dans l'ordre. Un réseau filtré (école, entreprise)
+        // bloque souvent un hôte sans prévenir : chaque source n'est essayée
+        // que si sa définition arrive vraiment, et les domaines jsDelivr
+        // alternatifs servent exactement le même dépôt.
+        mirrors: [
+            { name: 'jsDelivr', base: 'https://cdn.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/' },
+            { name: 'jsDelivr Fastly', base: 'https://fastly.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/' },
+            { name: 'jsDelivr Gcore', base: 'https://gcore.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/' },
+            { name: 'GitHub', base: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31/' },
+            { name: 'GitHack', base: 'https://raw.githack.com/minmonsterindev/geofs-missile-mod/main/assets/mig31/' },
+            { name: 'Statically', base: 'https://cdn.statically.io/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/' }
+        ],
         id: 9917,
         name: 'MiG-31 Foxhound (LEGO)',
         active: false,
@@ -1868,17 +1880,38 @@
         });
     }
 
+    // GeoFS accepte une définition en posant `this.id` puis en appelant init().
+    // Or init() peut lever au milieu (caméra pas encore initialisée, instrument)
+    // après avoir déjà posé l'avion : dans ce cas la promesse de change() ne se
+    // résout jamais. On surveille donc l'id, seul signe fiable que le jeu a pris
+    // la définition, quelle que soit la suite.
+    function bonusWaitAccepted(inst, ms) {
+        const t0 = performance.now();
+        return new Promise(resolve => {
+            const step = () => {
+                if (String(inst.id) === String(BONUS.id)) return resolve(true);
+                if (performance.now() - t0 > ms) return resolve(false);
+                setTimeout(step, 200);
+            };
+            step();
+        });
+    }
+
     // Charge l'avion depuis `base`.
     //   def : la définition a bien été construite par GeoFS (id 9917)
     //   ok  : le maillage est réellement affiché
     function bonusTryLoad(inst, base, onTick) {
         if (!bonusRegister(base)) return Promise.resolve({ def: false, ok: false });
-        return bonusWithin(inst.change(BONUS.id, undefined, true), 60000, 'construction du MiG-31')
-            .then(() => {
-                if (String(inst.id) !== String(BONUS.id)) return { def: false, ok: false };
-                return bonusWaitMesh(inst, 90000, onTick).then(ok => ({ def: true, ok: ok }));
-            })
-            .catch(e => { warn('essai ' + base, e); return { def: false, ok: false }; });
+        try {
+            const p = inst.change(BONUS.id, undefined, true);
+            if (p && p.catch) p.catch(e => warn('changement d\'avion', e));
+        } catch (e) {
+            warn('changement d\'avion', e);
+        }
+        return bonusWaitAccepted(inst, 6000).then(def => {
+            if (!def) return { def: false, ok: false };
+            return bonusWaitMesh(inst, 90000, onTick).then(ok => ({ def: true, ok: ok }));
+        });
     }
 
     // Pour le message d'erreur : le fichier est-il seulement accessible ?
@@ -1966,6 +1999,59 @@
         });
     }
 
+    // GeoFS lit aircraft.json lui-même avec $.ajax. Sur un réseau filtré cette
+    // requête peut échouer alors que la nôtre passe (filtre du proxy sur la
+    // chaîne de requête, réponse en cache…) : le jeu appelle alors
+    // loadDefault('Could not load aircraft file') et l'utilisateur ne voit
+    // qu'un « définition refusée ». On télécharge donc la définition nous-mêmes
+    // et on la remet à GeoFS au moment où il la demande.
+    function bonusFetchDefinition(base) {
+        const url = base + 'aircraft.json?id=' + BONUS.id + '&t=' + Date.now();
+        return fetch(url, { cache: 'no-store' }).then(res => {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.text();
+        }).then(text => {
+            // Un portail captif ou un filtre répond 200 avec du HTML : on
+            // vérifie que c'est bien la définition avant de la donner au jeu.
+            let d = null;
+            try { d = JSON.parse(text); } catch (e) { throw new Error('page de blocage'); }
+            const p = d && d[0] && d[0].parts;
+            if (!Array.isArray(p) || !p.length) throw new Error('définition invalide');
+            return text;
+        });
+    }
+
+    // Réponse immédiate de $.ajax pour la seule requête aircraft.json de ce
+    // chargement, avec le texte déjà téléchargé.
+    let bonusAjaxRelease = null;
+    function bonusAjaxProvide(text, base) {
+        const $ = window.jQuery || window.$;
+        if (!$ || typeof $.ajax !== 'function' || !$.Deferred) return null;
+        if (bonusAjaxRelease) bonusAjaxRelease();
+        const orig = $.ajax;
+        const stub = function (url, opts) {
+            const u = String(url || '');
+            if (u.indexOf(base) === 0 && u.indexOf('aircraft.json') >= 0) {
+                const d = $.Deferred();
+                setTimeout(() => {
+                    try {
+                        if (opts && opts.success) opts.success(text, 'success', { status: 200, responseText: text });
+                    } catch (e) { warn('définition du MiG-31', e); }
+                    d.resolve(text, 'success', { status: 200 });
+                }, 0);
+                return d.promise();
+            }
+            return orig.apply(this, arguments);
+        };
+        $.ajax = stub;
+        const release = () => {
+            if ($.ajax === stub) $.ajax = orig;
+            if (bonusAjaxRelease === release) bonusAjaxRelease = null;
+        };
+        bonusAjaxRelease = release;
+        return release;
+    }
+
     // Le GLB ne fait que 1,8 Mo une fois compressé par le CDN, mais le
     // télécharger au moment de la bascule fait encore attendre sur 4G. Dès que
     // le joueur a utilisé le MiG une fois, on le remet en cache en tâche de
@@ -1975,8 +2061,11 @@
         try { if (localStorage.getItem(BONUS_SEEN) !== '1') return; } catch (e) { return; }
         setTimeout(() => {
             if (BONUS.loading) return;
-            bonusPreload(BONUS.base + 'mig31-lego.glb').catch(() =>
-                bonusPreload(BONUS.mirror + 'mig31-lego.glb').catch(() => { }));
+            const next = i => {
+                if (i >= BONUS.mirrors.length) return;
+                bonusPreload(BONUS.mirrors[i].base + 'mig31-lego.glb').catch(() => next(i + 1));
+            };
+            next(0);
         }, 20000);
     }
 
@@ -2008,67 +2097,83 @@
 
         // GeoFS met le jeu en pause pendant le chargement et n'affiche rien :
         // sur une petite connexion l'écran reste figé, on croit que ça ne
-        // charge pas. On lit d'abord la définition nous-mêmes (16 Ko) pour
-        // échouer tout de suite et avec un message clair si GitHub ne répond
-        // pas ; le maillage reste téléchargé par GeoFS, une seule fois — le
-        // précharger le ferait descendre deux fois, Cesium ne relisant pas
-        // le cache du navigateur.
-        let usedBase = BONUS.base;
+        // charge pas. On télécharge donc la définition nous-mêmes (13 Ko),
+        // source par source, avant de laisser GeoFS construire l'avion.
         const tick = s => {
             if (s >= 8) {                 // au-delà de 8 s, on explique l'attente
                 BONUS.status = 'maillage en construction… ' + s + ' s';
                 updateHUD();
             }
         };
-        bonusWithin(bonusPreload(BONUS.base + 'aircraft.json'), 15000, 'définition du MiG-31')
-            .then(() => {
-                BONUS.status = 'téléchargement du maillage et construction…';
+        const tried = [];
+        const t0 = performance.now();
+        // Une source n'est essayée que si sa définition arrive vraiment : un
+        // hôte bloqué échoue en quelques secondes au lieu de laisser le jeu
+        // charger l'avion par défaut puis afficher « définition refusée ».
+        const attempt = i => {
+            if (i >= BONUS.mirrors.length || performance.now() - t0 > 25000) {
+                return Promise.reject(new Error('aucune source joignable'));
+            }
+            const m = BONUS.mirrors[i];
+            if (i > 0) {
+                BONUS.status = 'source ' + m.name + '…';
                 updateHUD();
-                // Même appel que le menu « Aircraft » : GeoFS lit lui-même
-                // <path>aircraft.json, construit les pièces et place l'avion.
-                return bonusTryLoad(inst, BONUS.base, tick);
-            })
-            .then(res => {
-                if (res.ok) return 'CDN';
-                // Si la définition est bonne et que seul le maillage traîne,
-                // recharger ne ferait que retélécharger 9,4 Mo : on s'arrête.
-                if (res.def) throw new Error('maillage non affiché');
-                BONUS.status = 'définition refusée — second essai depuis GitHub…';
-                updateHUD();
-                log('définition refusée depuis le CDN, essai de raw.githubusercontent.com');
-                usedBase = BONUS.mirror;
-                return bonusTryLoad(inst, BONUS.mirror, tick).then(r2 => {
-                    if (!r2.ok) throw new Error(r2.def ? 'maillage non affiché' : 'définition refusée');
-                    return 'GitHub';
+            }
+            return bonusWithin(bonusFetchDefinition(m.base), 12000, m.name)
+                .then(text => {
+                    BONUS.status = 'téléchargement du maillage et construction…';
+                    updateHUD();
+                    // Même appel que le menu « Aircraft » : GeoFS construit les
+                    // pièces et place l'avion ; seule la définition vient de nous.
+                    const release = bonusAjaxProvide(text, m.base);
+                    return bonusTryLoad(inst, m.base, tick).then(res => {
+                        if (release) release();
+                        if (res.ok) return m;
+                        // Même définition sur toutes les sources : inutile de
+                        // recommencer ailleurs.
+                        throw new Error(res.def ? 'maillage non affiché' : 'définition refusée par GeoFS');
+                    }, e => { if (release) release(); throw e; });
+                })
+                .catch(e => {
+                    const msg = (e && e.message) || String(e);
+                    if (/maillage non affiché|par GeoFS/.test(msg)) throw e;
+                    tried.push(m.name + ' : ' + msg);
+                    log('définition — ' + m.name + ' : ' + msg);
+                    return attempt(i + 1);
                 });
-            })
-            .then(source => {
+        };
+        attempt(0)
+            .then(got => {
                 BONUS.loading = false;
                 BONUS.status = '';
                 BONUS.error = '';
                 BONUS.saved = { id: savedId, fullPath: savedPath };
                 // load() ne met fullPath à jour que pour les avions distants ;
                 // certains accessoires (livrée, cockpit) le lisent encore.
-                inst.fullPath = usedBase;
+                inst.fullPath = got.base;
                 bonusKeepSavedId(savedId);
                 BONUS.active = true;
                 try { localStorage.setItem(BONUS_SEEN, '1'); } catch (e) { }
                 bonusExteriorView();
                 updateHUD();
-                toast('MiG-31 LEGO — avion complet chargé' + (source === 'GitHub' ? ' (secours GitHub)' : ''), '#39ff88');
-                log('Avion bonus : ' + BONUS.name + ' via geofs.aircraftList (id ' + BONUS.id + ', source ' + source + ')');
+                toast('MiG-31 LEGO — avion complet chargé' + (got.name === 'jsDelivr' ? '' : ' (secours ' + got.name + ')'), '#39ff88');
+                log('Avion bonus : ' + BONUS.name + ' via geofs.aircraftList (id ' + BONUS.id + ', source ' + got.name + ')');
             })
             .catch(e => {
                 BONUS.loading = false;
                 BONUS.status = '';
+                if (bonusAjaxRelease) bonusAjaxRelease();
                 const msg = (e && e.message) || String(e);
-                BONUS.error = 'échec : ' + msg;
+                BONUS.error = 'échec : ' + (tried.length ? tried.join(' · ') : msg);
                 updateHUD();
                 warn('avion bonus', e);
+                const shout = msg === 'aucune source joignable'
+                    ? 'sources injoignables (réseau filtré ?)'
+                    : msg;
                 // Ne jamais laisser un avion invisible : on remet celui d'avant.
                 try { geofs.doPause(0); } catch (e0) { }
                 try { if (String(inst.id) === String(BONUS.id)) inst.change(savedId, undefined, true); } catch (e2) { }
-                toast('MiG-31 non chargé — ' + msg, '#ff5a3c');
+                toast('MiG-31 non chargé — ' + shout, '#ff5a3c');
                 // Diagnostic : le fichier est-il joignable sur les deux sources ?
                 Promise.all([
                     bonusProbe(BONUS.base + 'mig31-lego.glb'),
