@@ -127,7 +127,7 @@
      [
       0,
       0,
-      -3.45
+      -3.2
      ],
      [
       0,
@@ -137,12 +137,12 @@
      [
       3.2,
       0,
-      -3.3
+      -3.15
      ],
      [
       -3.2,
       0,
-      -3.3
+      -3.15
      ],
      [
       0,
@@ -424,14 +424,9 @@
     ],
     "collisionPoints": [
      [
-      0.17,
-      0.8,
-      -1.28
-     ],
-     [
-      -0.5,
-      -0.35,
-      -1.28
+      0,
+      0,
+      -1.4
      ]
     ],
     "animations": [
@@ -452,6 +447,11 @@
      "damping": 2
     },
     "rotation": [
+     0,
+     0,
+     0
+    ],
+    "modelOnlyRotation": [
      0,
      0,
      90
@@ -468,14 +468,9 @@
     ],
     "collisionPoints": [
      [
-      -0.17,
-      0.8,
-      -1.28
-     ],
-     [
-      0.5,
-      -0.35,
-      -1.28
+      0,
+      0,
+      -1.4
      ]
     ],
     "animations": [
@@ -496,6 +491,11 @@
      "damping": 2
     },
     "rotation": [
+     0,
+     0,
+     0
+    ],
+    "modelOnlyRotation": [
      0,
      0,
      90
@@ -514,7 +514,7 @@
      [
       0,
       0,
-      -1.62
+      -1.65
      ]
     ],
     "animations": [
@@ -531,10 +531,15 @@
      }
     ],
     "suspension": {
-     "stiffness": 30,
+     "stiffness": 120,
      "damping": 2
     },
     "rotation": [
+     0,
+     0,
+     0
+    ],
+    "modelOnlyRotation": [
      0,
      0,
      90
@@ -571,7 +576,7 @@
    "wheel": {
     "frictionCoef": 2,
     "dynamicFriction": 0.01,
-    "rollingFriction": 0.00001,
+    "rollingFriction": 1e-05,
     "damping": 1
    },
    "frame": {
@@ -605,4 +610,4 @@
    }
   }
  }
-]
+ ]
