@@ -209,6 +209,25 @@ rotation de 90° (principaux) et −110° (nez) sur `gearPosition`, avec dispari
 
 Le maillage du corps perd 1 700 triangles (les trains), et `mig31-lego.glb` n'est plus utilisé.
 
+## Décollage et vol (1.21.1)
+
+L'avion restait collé au sol pour trois raisons, toutes dans la définition et non dans le
+modèle 3D :
+
+- les ailes étaient orientées à **−0,4°**, ce qui donnait une portance **négative** (elles
+  plaquaient l'avion au sol à mesure qu'il accélérait) ;
+- la profondeur était montée à l'envers : tirer le manche poussait le nez vers le bas ;
+- 41 t de masse pour 2 × 30 m² d'ailes demandaient une vitesse que l'avion n'atteignait pas.
+
+Nouvelle définition : ailes à **−8°** et 60 m² chacune (décrochage repoussé à 16°), profondeur
+remise dans le bon sens (rotation 180°), masse **30 t** (poids à vide réel du MiG-31 plus le
+carburant). Mesuré en jeu avec la définition publiée : l'avion quitte le sol vers **150 kt**
+(≈ 280 km/h) et monte. La montée est franche — la poussée dépasse le poids — donc réduis les
+gaz après le décollage.
+
+Attention : le MiG-31 reste un gros appareil, la profondeur est sensible à haute vitesse ;
+des petits coups de manche suffisent.
+
 ## Poids du maillage
 
 Le GLB fait 8,96 Mo mais jsDelivr le sert compressé en **1,83 Mo** (mesuré sur les en-têtes),
