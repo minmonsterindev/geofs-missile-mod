@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.21.1
+// @version      1.21.2
 // @updated      2026-11-20
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.21.1';
+    const VERSION = '1.21.2';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -1802,10 +1802,13 @@
         // que si sa définition arrive vraiment, et les domaines jsDelivr
         // alternatifs servent exactement le même dépôt.
         mirrors: [
+            // GitHub d'abord : les CDN gardent `@main` en cache plusieurs
+            // heures, donc une correction de définition peut arriver en retard
+            // (l'avion reste alors avec les anciens réglages de vol).
+            { name: 'GitHub', base: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31/' },
             { name: 'jsDelivr', base: 'https://cdn.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/' },
             { name: 'jsDelivr Fastly', base: 'https://fastly.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/' },
             { name: 'jsDelivr Gcore', base: 'https://gcore.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/' },
-            { name: 'GitHub', base: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31/' },
             { name: 'GitHack', base: 'https://raw.githack.com/minmonsterindev/geofs-missile-mod/main/assets/mig31/' },
             { name: 'Statically', base: 'https://cdn.statically.io/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/' }
         ],

@@ -319,7 +319,7 @@ calque posé sur un autre appareil, le MiG-31 est décrit par un `aircraft.json`
 complet (ailes, moteurs, train, points de collision, caméras) et GeoFS le
 charge comme n'importe quel avion du jeu.
 
-- `assets/mig31/aircraft.json` — définition : 41 t, 2 × 93 kN, 13,46 m
+- `assets/mig31/aircraft.json` — définition : 30 t, 2 × 152 kN, 13,46 m
 d'envergure, 22,70 m de long, `startAltitude` 3,45 m (ventre du modèle) ;
 - `assets/mig31/mig31-lego.glb` — le maillage (**108 781 triangles**, 9,2 Mo),
 échelle réelle. Il est reconstruit depuis le GLB ImageToStl du modèle Mecabricks
