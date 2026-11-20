@@ -191,6 +191,24 @@ secondes, retour à l'avion d'origine, aucune boucle. Enfin, l'attente ne dépen
 promesse de `change()` : GeoFS peut lever dans `init()` (caméra pas encore prête) après avoir
 déjà posé l'avion, et cette promesse ne se résout alors jamais — c'est l'id 9917 qui fait foi.
 
+## Train d'atterrissage rentrant (1.21.0)
+
+Le GLB d'origine est un maillage unique (1 183 primitives, aucun nœud nommé) : GeoFS ne
+pouvait donc rien animer. Le modèle est maintenant découpé en quatre fichiers — le corps
+(`mig31-body.glb`) et les trois trains (`gear-nose.glb`, `gear-left.glb`, `gear-right.glb`),
+les triangles étant classés par leur centre dans des boîtes 3D autour des roues. Chaque train
+est une pièce GeoFS à part entière : `wheel` avec son `model`, son pivot (`position`) et ses
+points de contact — les roues sont donc là où on les voit, plus 1,8 m derrière comme avant.
+
+Les pivots sont à la tête de jambe (nez : avant 3,6 m / hauteur −1,8 m ; principaux : ±1,55 m
+/ arrière 3,9 m). Les fichiers sont écrits dans le même repère auteur que le corps (x =
+envergure, y = hauteur, z = longueur, nez vers −z) et portent la même `rotation: [0,0,90]`,
+sinon GeoFS les couche à 90°. Les trois pièces rentrent avec la touche **G** de GeoFS :
+rotation de 90° (principaux) et −110° (nez) sur `gearPosition`, avec disparition au-delà de
+0,9 pour ne pas voir le train dépasser du ventre une fois rentré.
+
+Le maillage du corps perd 1 700 triangles (les trains), et `mig31-lego.glb` n'est plus utilisé.
+
 ## Poids du maillage
 
 Le GLB fait 8,96 Mo mais jsDelivr le sert compressé en **1,83 Mo** (mesuré sur les en-têtes),
