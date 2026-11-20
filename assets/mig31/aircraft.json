@@ -96,7 +96,7 @@
             {
                 "name": "body",
                 "type": "airfoil",
-                "model": "mig31-lego.glb",
+                "model": "mig31-body.glb",
                 "shadows": "SHADOWS_NONE",
                 "position": [
                     0,
@@ -122,7 +122,7 @@
                     [
                         0,
                         9.5,
-                        -3.0
+                        -3
                     ],
                     [
                         0,
@@ -132,7 +132,7 @@
                     [
                         0,
                         -9.5,
-                        -3.0
+                        -3
                     ],
                     [
                         3.2,
@@ -410,7 +410,7 @@
                 "position": [
                     2.3,
                     -1.6,
-                    -3.0
+                    -3
                 ],
                 "collisionPoints": [
                     [
@@ -443,7 +443,7 @@
                 "position": [
                     -2.3,
                     -1.6,
-                    -3.0
+                    -3
                 ],
                 "collisionPoints": [
                     [
@@ -475,8 +475,8 @@
                 "type": "wheel",
                 "position": [
                     0,
-                    9.0,
-                    -3.0
+                    9,
+                    -3
                 ],
                 "collisionPoints": [
                     [
@@ -541,7 +541,7 @@
             "wheel": {
                 "frictionCoef": 2,
                 "dynamicFriction": 0.01,
-                "rollingFriction": 1e-05,
+                "rollingFriction": 0.00001,
                 "damping": 1
             },
             "frame": {

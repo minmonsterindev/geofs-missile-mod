@@ -2063,7 +2063,7 @@
             if (BONUS.loading) return;
             const next = i => {
                 if (i >= BONUS.mirrors.length) return;
-                bonusPreload(BONUS.mirrors[i].base + 'mig31-lego.glb').catch(() => next(i + 1));
+                bonusPreload(BONUS.mirrors[i].base + 'mig31-body.glb').catch(() => next(i + 1));
             };
             next(0);
         }, 20000);
