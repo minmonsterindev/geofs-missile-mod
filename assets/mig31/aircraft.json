@@ -441,7 +441,12 @@
                 "suspension": {
                     "stiffness": 80,
                     "damping": 2
-                }
+                },
+                "rotation": [
+                    0,
+                    0,
+                    90
+                ]
             },
             {
                 "name": "mainGearRight",
@@ -480,7 +485,12 @@
                 "suspension": {
                     "stiffness": 80,
                     "damping": 2
-                }
+                },
+                "rotation": [
+                    0,
+                    0,
+                    90
+                ]
             },
             {
                 "name": "frontWheel",
@@ -520,7 +530,12 @@
                 "suspension": {
                     "stiffness": 30,
                     "damping": 2
-                }
+                },
+                "rotation": [
+                    0,
+                    0,
+                    90
+                ]
             },
             {
                 "name": "rightEngine",
