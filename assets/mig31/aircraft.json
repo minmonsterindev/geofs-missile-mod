@@ -362,7 +362,7 @@
      -9.4,
      0
     ],
-    "liftFactor": 10,
+    "liftFactor": 7,
     "dragFactor": 0.2,
     "forceDirection": "Z",
     "points": {

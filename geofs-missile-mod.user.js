@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.21.2
+// @version      1.22.0
 // @updated      2026-11-20
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.21.2';
+    const VERSION = '1.22.0';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -2158,6 +2158,7 @@
                 BONUS.active = true;
                 try { localStorage.setItem(BONUS_SEEN, '1'); } catch (e) { }
                 bonusExteriorView();
+                bonusFlightCheck();
                 updateHUD();
                 toast('MiG-31 LEGO — avion complet chargé' + (got.name === 'jsDelivr' ? '' : ' (secours ' + got.name + ')'), '#39ff88');
                 log('Avion bonus : ' + BONUS.name + ' via geofs.aircraftList (id ' + BONUS.id + ', source ' + got.name + ')');
@@ -2189,7 +2190,74 @@
             });
     }
 
+    /* ========================= CONTRÔLE PHYSIQUE ========================= */
+    // Un avion « collé au sol » vient presque toujours de la définition, pas du
+    // modèle : portance d'aile négative (incidence à l'envers) ou profondeur
+    // inversée (tirer le manche fait pousser le nez). On surveille les deux
+    // pendant les 45 premières secondes et on le dit clairement au lieu de
+    // laisser chercher.
+    const CHECK = { timer: 0, says: {}, pitchAngle: null, pullSince: 0 };
+
+    function checkSay(key, text, bad) {
+        if (CHECK.says[key]) return;
+        CHECK.says[key] = text;
+        log('contrôle physique — ' + text);
+        if (bad) toast(text, '#ffb02e');
+    }
+
+    function checkStop() {
+        if (CHECK.timer) clearInterval(CHECK.timer);
+        CHECK.timer = 0;
+    }
+
+    function bonusFlightCheck() {
+        checkStop();
+        CHECK.says = {};
+        CHECK.pitchAngle = null;
+        CHECK.pullSince = 0;
+        const t0 = Date.now();
+        CHECK.timer = setInterval(() => {
+            const v = (geofs.animation && geofs.animation.values) || {};
+            const kias = v.kias || 0;
+            const wing = (v.leftWingLift || 0) + (v.rightWingLift || 0);
+            const elev = v.elevatorLift || 0;
+            const pitch = v.pitch || 0;
+            if (kias > 40) {
+                if (wing < -500) {
+                    checkSay('wing', 'ailes : portance NÉGATIVE (' + Math.round(wing) + ' N à '
+                        + Math.round(kias) + ' kt) — incidence à l\'envers', true);
+                } else if (wing > 2000) {
+                    checkSay('wing', 'ailes : portance correcte (+' + Math.round(wing)
+                        + ' N à ' + Math.round(kias) + ' kt)', false);
+                }
+            }
+            // À basse vitesse la profondeur ne produit que du bruit : on ne
+            // juge son sens qu'une fois l'avion lancé.
+            // La profondeur ne se juge pas sur l'effort mesuré mais sur ce que
+            // fait vraiment l'avion : on tire le manche et on regarde si
+            // l'assiette monte. Au sol l'assiette ne bouge pas, donc pas de
+            // verdict (et pas de fausse alerte) avant le décollage.
+            const ac = geofs.aircraft.instance;
+            const ang = (ac && ac.htr && typeof ac.htr[1] === 'number') ? ac.htr[1] : null;
+            if (kias > 60 && ang !== null) {
+                if (pitch < -0.5) {
+                    if (!CHECK.pullSince) { CHECK.pullSince = Date.now(); CHECK.pitchAngle = ang; }
+                    else if (Date.now() - CHECK.pullSince > 900 && Math.abs(ang - CHECK.pitchAngle) > 0.6) {
+                        const noseUp = ang > CHECK.pitchAngle;
+                        checkSay('elev', noseUp
+                            ? 'profondeur dans le bon sens (manche tiré → nez qui monte)'
+                            : 'profondeur INVERSÉE (manche tiré → nez qui descend)', !noseUp);
+                    }
+                } else {
+                    CHECK.pullSince = 0;
+                }
+            }
+            if (Date.now() - t0 > 45000 || (CHECK.says.wing && CHECK.says.elev)) checkStop();
+        }, 500);
+    }
+
     function bonusRestore() {
+        checkStop();
         if (!BONUS.active || !BONUS.saved) return;
         const inst = geofs.aircraft.instance;
         if (!inst || typeof inst.change !== 'function') return;

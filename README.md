@@ -209,7 +209,7 @@ rotation de 90° (principaux) et −110° (nez) sur `gearPosition`, avec dispari
 
 Le maillage du corps perd 1 700 triangles (les trains), et `mig31-lego.glb` n'est plus utilisé.
 
-## Décollage et vol (1.21.1)
+## Décollage et vol (1.22.0)
 
 L'avion restait collé au sol pour trois raisons, toutes dans la définition et non dans le
 modèle 3D :
@@ -225,8 +225,23 @@ carburant). Mesuré en jeu avec la définition publiée : l'avion quitte le sol 
 (≈ 280 km/h) et monte. La montée est franche — la poussée dépasse le poids — donc réduis les
 gaz après le décollage.
 
-Attention : le MiG-31 reste un gros appareil, la profondeur est sensible à haute vitesse ;
-des petits coups de manche suffisent.
+Attention : le MiG-31 reste un gros appareil ; la profondeur est volontairement adoucie
+(puissance 7 au lieu de 10) pour que les petits coups de manche suffisent. Si l'avion ne
+lève plus le nez au décollage, remets `liftFactor` de la partie `elevator` à 10 dans
+`assets/mig31/aircraft.json`.
+
+### Contrôle automatique au chargement (1.22.0)
+
+Un avion « collé au sol » vient presque toujours de la définition, pas du modèle 3D. Le mod
+surveille donc deux choses pendant les 45 premières secondes et le dit dans la console
+(`[MissileMod] contrôle physique — …`) et par un toast orange en cas de problème :
+
+- **portance des ailes** : dès 40 kt, si `leftWingLift + rightWingLift` devient négative, il
+  annonce « portance NÉGATIVE » avec la valeur et la vitesse. C'est ce contrôle qui a détecté
+  une incidence à l'envers à −286 977 N lors des essais ;
+- **sens de la profondeur** : il ne juge pas l'effort mesuré (qui n'est que du bruit à basse
+  vitesse) mais l'assiette réelle — manche tiré, on regarde si `htr[1]` monte. Au sol
+  l'assiette ne bouge pas, donc pas de verdict avant le décollage, et pas de fausse alerte.
 
 ## Poids du maillage
 
