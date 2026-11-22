@@ -2,13 +2,14 @@
 
 Missiles air-air et bombes pour les avions militaires de [GeoFS](https://www.geo-fs.com/).
 100 % autonome : aucun modèle 3D ni texture externe, tout est généré (géométrie Cesium et
-textures canvas).
+couleurs par instance).
 
-Version **1.23.0** : le mod **ne fournit plus d'avion**. Le MiG-31 LEGO est retiré et vit
+Version **1.23.1** : le mod **ne fournit plus d'avion**. Le MiG-31 LEGO est retiré et vit
 désormais dans son propre projet ; les fichiers de `assets/mig31/` restent dans le dépôt mais
-plus rien ne les charge. Le rendu des munitions a été revu : la base d'une munition n'est plus
-recalculée pour chaque pièce à chaque image, ce qui supprime le lag des appareils chargés
-(jusqu'à 20 bombes). Le script se met à jour tout seul depuis GitHub.
+plus rien ne les charge. Le rendu des munitions a été refait : les pièces ne sont plus des
+entités dynamiques (Cesium détruisait et recréait une primitive par pièce **à chaque image**),
+mais des géométries cuites une fois dans un seul `Primitive` par munition. Le script se met à
+jour tout seul depuis GitHub.
 
 ## Installation (Tampermonkey)
 
@@ -32,7 +33,7 @@ chargement, garder l'ancien script installé ne gêne pas.
 3. Le script porte `@updateURL` / `@downloadURL` : Tampermonkey le met à jour tout seul
    (Tableau de bord → **Paramètres → Vérifier les mises à jour**, par défaut toutes les 12 h).
 
-La console (`F12`) affiche `[MissileMod] v1.23.0 prêt`.
+La console (`F12`) affiche `[MissileMod] v1.23.1 prêt`.
 
 ## Commandes
 
@@ -69,12 +70,13 @@ désarmer) et chaque missile déjà tiré garde les performances de son type.
 La portée affichée dans le HUD (`Contacts (xx km)`) et le verrouillage automatique suivent le
 missile choisi : avec un R-73, pas de lock à 30 km.
 
-## Textures
+## Couleurs
 
-Aucun fichier distant : chaque missile et chaque bombe reçoit une texture 64×64 dessinée en
-canvas au chargement (panneaux, rivets, reflet métallique et bandes d'identification à la
-couleur du type). Elle est appliquée via `Cesium.ImageMaterialProperty`, avec repli sur une
-couleur unie si le navigateur refuse le canvas.
+Aucun fichier distant : chaque pièce est une géométrie Cesium (cylindre ou boîte) colorée par
+instance via `PerInstanceColorAppearance`. Le corps, l'ogive, la ceinture d'identification, le
+culot et les ailettes gardent donc leur couleur, mais plus de texture : une texture de 64×64
+sur un corps de 18 cm ne se voyait pas, et `PerInstanceColorAppearance` permet surtout de
+fondre **toutes** les pièces d'une munition dans un seul appel de dessin.
 
 ## Calcul de la position
 
@@ -92,9 +94,11 @@ Piège Cesium : `new Cesium.Matrix4(a, b, c, …)` **ignore ses arguments** et r
 La matrice est donc remplie par `Matrix4.fromColumnMajorArray([...], new Matrix4())`. Sans ça,
 les missiles partaient à l'origine de la Terre (bug corrigé en 1.7.0, trouvé en jeu).
 
-Chaque pièce est une `CallbackProperty` : elle lit la base de sa munition, calculée une fois
-par image et partagée par toutes les pièces (voir « Optimisation du rendu des munitions »).
-Aucune image de retard : le missile tiré part de la position courante.
+Les pièces d'une munition sont des `GeometryInstance` cuites une fois, à leur place dans le
+repère de la munition. À chaque image le mod ne réécrit que la matrice modèle de la munition
+(`primitive.modelMatrix`) : les emports reçoivent celle de l'avion, une munition en vol la
+sienne, construite depuis sa position et son axe. Aucune image de retard : le missile tiré
+part de la position courante.
 
 ## Emports par appareil
 
@@ -170,35 +174,41 @@ sont des symboles que GeoFS n'utilise pas : hors calibrage, `²` redevient une t
 
 Réglages sauvegardés par appareil dans le `localStorage`.
 
-## Optimisation du rendu des munitions (1.23.0)
+## Optimisation du rendu des munitions (1.23.0 – 1.23.1)
 
-Le lag ne venait pas du nombre de missiles tirés mais des **munitions posées** sous les ailes :
-chaque pièce (corps, ogive, ceinture, culot, tuyère, quatre ailettes, quatre canards) était une
-entité Cesium dont la position **et** l'orientation étaient recalculées depuis zéro à chaque
-évaluation — produit vectoriel, normalisations, sin/cos, matrice 3×3 puis quaternion. Cesium
-demande ces propriétés plusieurs fois par image, si bien qu'un B-52 (20 bombes × 10 pièces =
-200 pièces) déclenchait des milliers de calculs et d'allocations par image, même sans tirer.
+Trois causes de lag se cumulaient ; la dernière, de loin la plus lourde, n'était pas du
+JavaScript.
 
-Désormais :
+1. **Recalcul par pièce (1.23.0 – 1.23.1)** — chaque pièce recalculait sa position et son
+   orientation depuis zéro à chaque évaluation (produit vectoriel, normalisations, sin/cos,
+   matrice 3×3, quaternion), et Cesium demande ces propriétés plusieurs fois par image. La
+   base d'une munition est maintenant calculée une fois par image et par munition, et la
+   position d'un emport une fois par image (`stationPos`). Mesure sur 200 pièces : ≈ 115 →
+   12 µs par image ; 25,1 → 4,2 µs pour les emports.
 
-- la base de la munition (avant, droite, haut, quaternion) est calculée **une fois par image et
-  par munition**, puis mise en cache sur la munition (`weaponFrame`) ;
-- le roulis de chaque pièce (cos, sin, quaternion) est calculé **une fois à la construction** ;
-- une pièce ne fait plus qu'un décalage le long de cette base : trois multiplications et trois
-  additions, sans trigonométrie ni allocation ;
-- le numéro d'image n'est plus relu dans `window` par chaque pièce : il est relevé une fois par
-  tick (`S.frameNo`), et la référence Cesium est mémorisée (`C`) au lieu d'être redemandée à
-  `window` des centaines de fois par image.
+2. **Géométrie dynamique (1.23.1)** — le vrai coupable. Une pièce dont la position vient d'une
+   `CallbackProperty` est « dynamique » pour Cesium, et pour une géométrie dynamique son
+   `DynamicGeometryUpdater` **détruit et recrée un `Primitive` à chaque image**
+   (`removeAndDestroy` puis `new Primitive`, donc de nouveaux tampons GPU). Un B-52 garé
+   (20 bombes × 8 pièces) déclenchait **160 destructions/recréations de primitives par
+   image**, même sans tirer : aucune optimisation de calcul ne pouvait l'enlever. Les pièces
+   sont désormais cuites **une fois** dans un seul `Primitive` par munition ; à chaque image
+   le mod ne réécrit que `primitive.modelMatrix`, que Cesium recopie dans ses commandes de
+   dessin. Une munition = **1 primitive = 1 appel de dessin** au lieu de 8 à 14 entités
+   dynamiques ; 20 bombes = 20 primitives au lieu de 160.
 
-Mesure sur 200 pièces, deux évaluations par pièce et par image (mêmes formules, même Cesium) :
-**≈ 115 µs → ≈ 12 µs par image**, soit **90 % du calcul en moins** (×9). La géométrie est
-identique au bit près : écart mesuré **0 m** sur 206 orientations × 6 pièces, et 7,8 × 10⁻¹⁶
-sur les rotations.
+3. **Flou du panneau** — `backdrop-filter: blur(4px)` obligeait le compositeur à relire le
+   canvas WebGL à chaque image, pour un fond déjà opaque à 97 %. Supprimé.
+
+La géométrie rendue est identique à l'ancienne : écart mesuré **1,3 × 10⁻⁹ m** sur
+206 orientations × 30 pièces, et 8,3 × 10⁻¹⁶ sur les rotations (`.tooling/test-munition-math.js`).
+Le smoke test charge le userscript complet dans jsdom avec le vrai Cesium : 86 pièces,
+**10 primitives, 0 entité dynamique**, tir, réarmement, largage et suivi de la rotation.
 
 Autres sources de lag traitées :
 
-- **emport vide** : un missile tiré n'est plus simplement masqué, ses entités sont **retirées**
-  du rendu ; le réarmement (`D`) les reconstruit. Un avion qui a tout tiré ne coûte plus rien ;
+- **emport vide** : un missile tiré n'est plus simplement masqué, sa primitive est **retirée**
+  du rendu ; le réarmement (`D`) la reconstruit (géométries en cache) ;
 - **HUD et panneau** : le texte est construit à chaque mise à jour mais le DOM n'est réécrit
   **que s'il change** (`HUD.sig`, `HUD.panelSig`), deux fois par seconde au lieu de cinq ;
 - **effets** (fumée, explosions) : une image sur deux au-delà de deux particules ;
@@ -243,6 +253,57 @@ forceAllAircraft: false
 Les performances de vol (vitesse, accélération, agilité, portée, durée de vie, fusée de
 proximité) ne sont plus dans `CFG` : elles appartiennent à chaque entrée de `MISSILE_TYPES`,
 puisque c'est le missile choisi qui les définit.
+
+## Décollage du MiG-31 (`assets/mig31/`)
+
+Le mod ne charge plus cet appareil, mais sa définition est restée dans le dépôt. Au décollage il
+se cabrait brutalement vers **29 kt**, bien avant que la portance puisse le porter : à 14,9 m/s,
+120 m² d'aile ne donnent qu'une quinzaine de kN, soit 5 % du poids. Le coupable n'était donc ni
+la portance ni la profondeur, mais la **poussée**.
+
+2 × 152 kN pour 30 t font un rapport poussée/poids de **1,03**, soit 10,1 m/s². Le centre de
+masse est à 3,45 m au-dessus du sol : le moment d'inertie (m·a·h) délestait le train avant de
+**87 %**, de 161 kN à 21 kN (7 % du poids). L'avion roulait alors sur ses seules roues
+principales et basculait d'un coup au premier couple venu — un simple coup de profondeur
+suffisait à le faire cabrer.
+
+| Champ | Avant | Après |
+|---|---|---|
+| `thrust` (× 2) | 152 000 N (T/W 1,03) | 112 000 N (T/W 0,76) |
+| `suspension` | `stiffness` / `damping` | + `motion: translate`, `axis: Z`, `ratio: 1`, `damping: 5` |
+| `contactProperties.wheel` | sans `lockSpeed` | `lockSpeed: 0.008` |
+
+La géométrie de l'aile (60 m² par côté, montée à −8°, décrochage à 16°) n'est **pas** touchée :
+c'est elle qui a été validée en jeu à la 1.22.0 (décollage vers 150 kt), et à 29 kt elle ne
+produit que 4 % du poids. Y toucher n'aurait fait que rallonger la course sur herbe.
+
+À pleine poussée le train avant garde maintenant 20 % du poids (contre 7 %) : l'avion reste
+posé et se cabre à la profondeur, pas tout seul. L'accélération passe de 10,1 à 7,5 m/s², soit
+environ 110 m de course en plus à vitesse de rotation égale ; le rapport poussée/poids de 0,76
+est celui du vrai MiG-31 et reste largement suffisant pour la montée comme pour l'herbe. Les
+trois roues reçoivent en plus les champs de suspension attendus par la doc GeoFS et un
+`lockSpeed`, ce qui calme le pompage sur terrain irrégulier.
+
+### Course de décollage sur herbe
+
+Chiffrée depuis la définition (`.tooling/takeoff-roll.js`) : intégration de
+m·dv/dt = T − D − μ·(W − L) pas à pas (1 ms), traînée parasite CdA 1 m², portance de roulage
+Cl 0,5, piste plate.
+
+| Rotation | Herbe sèche (μ 0,04) | Herbe normale (μ 0,06) | Herbe grasse (μ 0,10) |
+|---|---|---|---|
+| Vs, 104 kt | 201 m | 206 m | 216 m |
+| 1,1 Vs, 114 kt | 243 m | 248 m | 260 m |
+| 150 kt (vitesse observée en 1.22.0) | 416 m | 423 m | 439 m |
+
+À 150 kt, la rotation coûte **116 m de plus** qu'avec l'ancienne poussée (307 → 423 m,
++3,1 s), mais il reste **377 m de marge sur une piste en herbe de 800 m** et 577 m sur
+1 000 m. À cette vitesse l'aile porte déjà plus du double du poids : le décollage ne dépend
+plus de la poussée restante, seulement de la vitesse atteinte, et 0,76 de rapport
+poussée/poids suffit à accélérer et à monter.
+
+Ces chiffres sont **calculés depuis la définition** (masse, poussée, points de contact, centre de
+masse), pas mesurés en jeu.
 
 ## Limites connues
 
