@@ -1,4 +1,11 @@
 
+    function loadCal() {
+        try {
+            const raw = window.localStorage && localStorage.getItem(CAL_STORE);
+            return raw ? (JSON.parse(raw) || {}) : {};
+        } catch (e) { return {}; }
+    }
+
     function saveCal() {
         try {
             if (window.localStorage) localStorage.setItem(CAL_STORE, JSON.stringify(S.cal));

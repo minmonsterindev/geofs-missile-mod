@@ -258,3 +258,31 @@
             if (m.trailPts.length > CFG.trailPoints) m.trailPts.shift();
         }
     }
+
+    /* ============================== BOMBES ============================= */
+
+    function dropBomb() {
+        if (!S.ready) return;
+        if (!S.armed) { toast('Système non armé — [' + CFG.keys.arm.toUpperCase() + ']', '#ffce54'); return; }
+        if (!S.profile) { toast('Avion non militaire', '#ffce54'); return; }
+        if (!S.profile.bombs) { toast('Cet avion n\'emporte pas de bombes', '#ffce54'); return; }
+        if (S.bombs <= 0) { toast('Plus de bombes — [' + CFG.keys.reload.toUpperCase() + '] pour réarmer', '#ff5a3c'); return; }
+        if (S.bombsInAir.length >= CFG.maxBombsActive) { toast('Trop de bombes en vol', '#ffce54'); return; }
+
+        const now = performance.now();
+        if (now < S.bombCooldownUntil) return;
+        S.bombCooldownUntil = now + CFG.bombCooldown;
+
+        const Cesium = C();
+        const fr = playerFrame();
+        if (!fr) return;
+
+        const st = S.bombStations.find(s => !s.used);
+        if (!st) return;
+        const pos0 = stationPos(st, fr);
+        if (!pos0) return;
+
+        dropStation(st);
+
+        const ac = geofs.aircraft.instance;
+        const speed = ac.trueSpeed || ac.groundSpeed || 0;

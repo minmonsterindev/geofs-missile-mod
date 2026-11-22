@@ -1,32 +1,4 @@
 
-    /* ============================== BOMBES ============================= */
-
-    function dropBomb() {
-        if (!S.ready) return;
-        if (!S.armed) { toast('Système non armé — [' + CFG.keys.arm.toUpperCase() + ']', '#ffce54'); return; }
-        if (!S.profile) { toast('Avion non militaire', '#ffce54'); return; }
-        if (!S.profile.bombs) { toast('Cet avion n\'emporte pas de bombes', '#ffce54'); return; }
-        if (S.bombs <= 0) { toast('Plus de bombes — [' + CFG.keys.reload.toUpperCase() + '] pour réarmer', '#ff5a3c'); return; }
-        if (S.bombsInAir.length >= CFG.maxBombsActive) { toast('Trop de bombes en vol', '#ffce54'); return; }
-
-        const now = performance.now();
-        if (now < S.bombCooldownUntil) return;
-        S.bombCooldownUntil = now + CFG.bombCooldown;
-
-        const Cesium = C();
-        const fr = playerFrame();
-        if (!fr) return;
-
-        const st = S.bombStations.find(s => !s.used);
-        if (!st) return;
-        const pos0 = stationPos(st, fr);
-        if (!pos0) return;
-
-        dropStation(st);
-
-        const ac = geofs.aircraft.instance;
-        const speed = ac.trueSpeed || ac.groundSpeed || 0;
-
         // Vitesse initiale = celle de l'avion, mais on supprime toute composante
         // ascendante et on ajoute une petite poussée vers le bas : la bombe ne
         // monte jamais, même si l'appareil est cabré.
@@ -242,5 +214,71 @@
         if (S.profile) {
             log('Avion détecté : ' + name + ' (' + S.profile.name + ', ' + S.geo.halfSpan.toFixed(1) + ' m de demi-envergure)');
             toast('Emports disponibles — [' + CFG.keys.arm.toUpperCase() + '] pour armer', '#39ff88');
+        }
+    }
+
+    // Le maillage arrive après le changement d'avion : si la boîte d'aile
+    // manquait au moment du calcul, on réessaie (deux fois par seconde) et on
+    // replace les emports dès qu'on l'a.
+    // Bornée : au-delà de six essais le maillage ne viendra plus, et parcourir
+    // tout le glTF deux fois par seconde pour rien coûtait un à-coup régulier.
+    let wingAt = 0, wingTries = 0;
+    function retryWingBox() {
+        if (!S.profile) return;
+        if (S.geo.wing && S.geo.plates) return;
+        if (wingTries >= 6) return;
+        const now = performance.now();
+        if (now - wingAt < 500) return;
+        wingAt = now;
+        wingTries++;
+        const m = meshWing();
+        if (!m) return;
+        const gotBox = !S.geo.wing && m.box;
+        const gotPlates = !S.geo.plates && m.plates && m.plates.length;
+        if (!gotBox && !gotPlates) return;
+        if (!S.stations.concat(S.bombStations).every(st => !st.used)) return;
+        if (gotBox) S.geo.wing = m.box;
+        if (gotPlates) S.geo.plates = m.plates;
+        buildStations(S.profile);
+    }
+
+    function tick() {
+        if (!S.ready) return;
+        S.frameSeq++;
+        S.frameNo = readFrameNumber();
+        const now = performance.now();
+        const dt = Math.min(0.1, (now - (S.lastFrame || now)) / 1000);
+        S.lastFrame = now;
+
+        try {
+            checkAircraft();
+            retryWingBox();
+            placeStations();
+            if (now - S.contactsAt > 500) refreshContacts();
+            updateMissiles(dt);
+            updateBombs(dt);
+            updateFx(dt);
+            updateLock();
+            if (now - S.hudAt > 500) { S.hudAt = now; updateHUD(); }
+            updatePerf(now);
+        } catch (e) {
+            warn('tick', e);
+        }
+    }
+
+    // Une ancienne version enregistrait l'id 9917 (avion bonus retiré du mod)
+    // dans la sauvegarde de vol : GeoFS échouerait au lancement suivant avec
+    // « Could not load aircraft file ». On répare cet enregistrement.
+    function cleanStaleAircraftId() {
+        try {
+            const raw = localStorage.getItem('flight');
+            if (!raw) return;
+            const f = JSON.parse(raw);
+            if (!f || String(f.aircraftId) !== '9917') return;
+            f.aircraftId = String(geofs.aircraft.default);
+            localStorage.setItem('flight', JSON.stringify(f));
+            log('enregistrement de vol : id 9917 (avion retiré) → avion par défaut');
+        } catch (e) {
+            warn('enregistrement de vol', e);
         }
     }

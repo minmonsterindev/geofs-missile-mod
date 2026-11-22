@@ -246,10 +246,3 @@
     }
 
     /* ======================= CALIBRAGE DES EMPORTS ===================== */
-
-    function loadCal() {
-        try {
-            const raw = window.localStorage && localStorage.getItem(CAL_STORE);
-            return raw ? (JSON.parse(raw) || {}) : {};
-        } catch (e) { return {}; }
-    }
