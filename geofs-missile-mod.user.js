@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.23.2
+// @version      1.23.3
 // @updated      2026-11-22
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD, compteur FPS et appels de dessin.
 // @author       Buffy
@@ -74,7 +74,7 @@
             return;
         }
         try {
-            (0, eval)(parts.join('') + '\n//# sourceURL=geofs-missile-mod/1.23.2.js');
+            (0, eval)(parts.join('') + '\n//# sourceURL=geofs-missile-mod/1.23.3.js');
         } catch (err) {
             console.error('[MissileMod] défaut à l\'exécution', err);
             banner('Missile Mod : le code chargé a échoué (' + err.message +
