@@ -1,0 +1,36 @@
+name: publication — correctif ponctuel de src
+
+# Applique tools/src.patch à src/geofs-missile-mod.js, régénère mod/1..8,
+# puis supprime le correctif et ce workflow : il ne sert qu'une fois.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Appliquer le correctif
+        run: |
+          git apply --verbose tools/src.patch
+          rm tools/src.patch
+
+      - name: Régénérer les parties
+        run: node tools/build.js
+
+      - name: Committer et retirer le workflow ponctuel
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A src mod tools .github/workflows
+          git commit -m 'mod 1.23.3 : compteur échantillonné sur postRender, pick ignoré'
+          git push
