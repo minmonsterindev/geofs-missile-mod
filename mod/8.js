@@ -1,6 +1,4 @@
 
-    /* ===================== INTERFACE DÉDIÉE (PANNEAU) ================== */
-
     // Bouton inséré dans la barre du bas de GeoFS, entre « Location » et
     // « Camera » (les deux voisins directs dans .geofs-ui-bottom).
     function installPanelButton() {
@@ -68,29 +66,42 @@
 
     /* ====================== COMPTEUR FPS / APPELS DE DESSIN ============ */
 
-    // Appels de dessin de la dernière image rendue : Cesium remplit
-    // `frameState.commandList` pendant le rendu, on lit donc le total de
-    // l'image précédente. C'est le chiffre qui doit baisser avec le rendu par
-    // Primitive : une munition = un appel, au lieu d'une entité par pièce.
-    function drawCalls() {
+    // Ordre de Cesium, vérifié dans le build servi par GeoFS : render() vide
+    // `frameState.commandList` (updateFrameState), les primitives puis
+    // executeCommands le remplissent, et postRender n'est levé qu'ensuite : la
+    // liste contient alors l'image qui vient d'être rendue. GeoFS branche
+    // geofs.api.addFrameCallback sur `scene.preRender`, donc notre tick tourne
+    // AVANT ce vidage : il lirait l'image précédente (0 au premier rendu), ou
+    // la liste réduite d'un `scene.pick`, qui vide la liste et n'exécute que la
+    // passe de sélection. On échantillonne donc dans postRender, et seulement
+    // pour une passe de rendu normale.
+    const PERF = { frames: 0, since: 0, min: 0, draws: -1, frame: -1 };
+
+    function perfSample(scene) {
+        if (!S.perfOn) return;
+        const fs = scene && scene.frameState;
+        if (!fs || !fs.commandList || !fs.passes || !fs.passes.render) return;
+        PERF.draws = fs.commandList.length;
+        PERF.frame = fs.frameNumber;
+        PERF.frames++;
+    }
+
+    function bindPerf() {
         try {
             const scene = viewer().scene;
-            const fs = scene && scene.frameState;
-            if (fs && fs.commandList) return fs.commandList.length;
+            if (scene && scene.postRender) scene.postRender.addEventListener(perfSample);
         } catch (e) { }
-        return -1;
     }
 
     // Mesure par fenêtres de 500 ms : un FPS image par image saute trop pour
     // comparer deux réglages, et le minimum retenu montre les à-coups.
-    const PERF = { frames: 0, since: 0, min: 0, draws: -1 };
-
     function togglePerf() {
         S.perfOn = !S.perfOn;
         PERF.frames = 0;
         PERF.since = 0;
         PERF.min = 0;
         PERF.draws = -1;
+        PERF.frame = -1;
         if (S.ui && S.ui.perf) {
             S.ui.perf.classList.toggle('on', !!S.perfOn);
             S.ui.perf.textContent = S.perfOn ? 'mesure en cours…' : '';
@@ -100,18 +111,16 @@
 
     function updatePerf(now) {
         if (!S.perfOn) return;
-        PERF.frames++;
         if (!PERF.since) { PERF.since = now; return; }
         const span = now - PERF.since;
         if (span < 500) return;
         const fps = Math.round(PERF.frames * 1000 / span);
-        PERF.min = PERF.min ? Math.min(PERF.min, fps) : fps;
-        PERF.draws = drawCalls();
+        if (PERF.frames) PERF.min = PERF.min ? Math.min(PERF.min, fps) : fps;
         PERF.frames = 0;
         PERF.since = now;
         if (S.ui && S.ui.perf) {
             S.ui.perf.innerHTML = '<b>' + fps + '</b> i/s' +
-                ' <span class="dim">min ' + PERF.min + '</span>' +
+                ' <span class="dim">min ' + (PERF.min || '—') + '</span>' +
                 ' · <b>' + (PERF.draws >= 0 ? PERF.draws : '—') + '</b> appels de dessin';
         }
     }
@@ -235,6 +244,7 @@
         cleanStaleAircraftId();
         buildUI();
         installKeys();
+        bindPerf();
         // La barre du bas de GeoFS arrive parfois après le script : on réessaie.
         let tries = 0;
         const btnTimer = setInterval(() => {

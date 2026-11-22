@@ -1,27 +1,4 @@
 
-        const myId = String((geofs.aircraft.instance && geofs.aircraft.instance.id) || '');
-        const list = [];
-        Object.keys(users).forEach(id => {
-            if (id === myId || id === 'selfplayer') return;
-            const u = users[id];
-            const lla = userLLA(u);
-            if (!lla) return;
-            let pos;
-            try { pos = Cesium.Cartesian3.fromDegrees(lla[1], lla[0], lla[2]); } catch (e) { return; }
-            const d = Cesium.Cartesian3.distance(fr.origin, pos);
-            if (!isFinite(d)) return;
-            list.push({
-                id: id,
-                name: (u.callsign || u.name || ('#' + id)).toString().slice(0, 16),
-                pos: pos,
-                lla: lla,
-                dist: d
-            });
-        });
-        list.sort((a, b) => a.dist - b.dist);
-        S.contacts = list;
-    }
-
     function findContact(id) {
         if (!id) return null;
         for (let i = 0; i < S.contacts.length; i++) {
@@ -286,3 +263,14 @@
 
         const ac = geofs.aircraft.instance;
         const speed = ac.trueSpeed || ac.groundSpeed || 0;
+
+        // Vitesse initiale = celle de l'avion, mais on supprime toute composante
+        // ascendante et on ajoute une petite poussée vers le bas : la bombe ne
+        // monte jamais, même si l'appareil est cabré.
+        const up = Cesium.Cartesian3.normalize(Cesium.Cartesian3.clone(pos0, new Cesium.Cartesian3()), new Cesium.Cartesian3());
+        const vel = Cesium.Cartesian3.multiplyByScalar(fr.F, speed, new Cesium.Cartesian3());
+        const vUp = Cesium.Cartesian3.dot(vel, up);
+        if (vUp > 0) {
+            Cesium.Cartesian3.add(vel, Cesium.Cartesian3.multiplyByScalar(up, -vUp, new Cesium.Cartesian3()), vel);
+        }
+        Cesium.Cartesian3.add(vel, Cesium.Cartesian3.multiplyByScalar(up, -3, new Cesium.Cartesian3()), vel);

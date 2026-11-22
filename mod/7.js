@@ -1,15 +1,4 @@
 
-        // Vitesse initiale = celle de l'avion, mais on supprime toute composante
-        // ascendante et on ajoute une petite poussée vers le bas : la bombe ne
-        // monte jamais, même si l'appareil est cabré.
-        const up = Cesium.Cartesian3.normalize(Cesium.Cartesian3.clone(pos0, new Cesium.Cartesian3()), new Cesium.Cartesian3());
-        const vel = Cesium.Cartesian3.multiplyByScalar(fr.F, speed, new Cesium.Cartesian3());
-        const vUp = Cesium.Cartesian3.dot(vel, up);
-        if (vUp > 0) {
-            Cesium.Cartesian3.add(vel, Cesium.Cartesian3.multiplyByScalar(up, -vUp, new Cesium.Cartesian3()), vel);
-        }
-        Cesium.Cartesian3.add(vel, Cesium.Cartesian3.multiplyByScalar(up, -3, new Cesium.Cartesian3()), vel);
-
         const v = {
             body: null,
             pos: Cesium.Cartesian3.clone(pos0, new Cesium.Cartesian3()),
@@ -282,3 +271,5 @@
             warn('enregistrement de vol', e);
         }
     }
+
+    /* ===================== INTERFACE DÉDIÉE (PANNEAU) ================== */

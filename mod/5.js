@@ -277,3 +277,26 @@
         const users = {};
         try { Object.assign(users, mp().users || {}); } catch (e) { }
         try { Object.assign(users, mp().visibleUsers || {}); } catch (e) { }
+
+        const myId = String((geofs.aircraft.instance && geofs.aircraft.instance.id) || '');
+        const list = [];
+        Object.keys(users).forEach(id => {
+            if (id === myId || id === 'selfplayer') return;
+            const u = users[id];
+            const lla = userLLA(u);
+            if (!lla) return;
+            let pos;
+            try { pos = Cesium.Cartesian3.fromDegrees(lla[1], lla[0], lla[2]); } catch (e) { return; }
+            const d = Cesium.Cartesian3.distance(fr.origin, pos);
+            if (!isFinite(d)) return;
+            list.push({
+                id: id,
+                name: (u.callsign || u.name || ('#' + id)).toString().slice(0, 16),
+                pos: pos,
+                lla: lla,
+                dist: d
+            });
+        });
+        list.sort((a, b) => a.dist - b.dist);
+        S.contacts = list;
+    }
