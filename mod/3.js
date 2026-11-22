@@ -12,6 +12,13 @@
             '.gmm-hud .armed{color:#ff5252;text-shadow:0 0 8px rgba(255,82,82,.6)}',
             '.gmm-hud .cal{color:#8ef6ff}',
             '.gmm-hud .keys{margin-top:6px;padding-top:6px;border-top:1px solid rgba(57,255,136,.18);color:#5c8f72;font-size:11px}',
+            '.gmm-perf{position:fixed;left:12px;top:70px;z-index:9998;pointer-events:none;display:none;',
+            'background:rgba(4,14,8,.62);border:1px solid rgba(57,255,136,.35);border-radius:5px;',
+            'padding:4px 8px;color:#39ff88;font:11px/1.45 ui-monospace,Consolas,monospace;',
+            'text-shadow:0 0 6px rgba(57,255,136,.35)}',
+            '.gmm-perf.on{display:block}',
+            '.gmm-perf b{color:#eafff2;font-weight:600}',
+            '.gmm-perf .dim{color:#5c8f72}',
             '.gmm-reticle{position:fixed;z-index:9997;pointer-events:none;display:none;width:52px;height:52px;',
             'margin:-26px 0 0 -26px;border:2px solid #ff3b30;border-radius:3px;box-shadow:0 0 10px rgba(255,59,48,.5)}',
             '.gmm-reticle:before,.gmm-reticle:after{content:"";position:absolute;background:#ff3b30}',
@@ -59,6 +66,12 @@
         toasts.className = 'gmm-toasts';
         document.body.appendChild(toasts);
 
+        // Compteur FPS / appels de dessin : l'élément existe toujours mais
+        // reste masqué tant que le panneau ne l'active pas (voir togglePerf).
+        const perf = document.createElement('div');
+        perf.className = 'gmm-perf';
+        document.body.appendChild(perf);
+
         // Interface dédiée, ouverte par le bouton de la barre GeoFS (ou U).
         const panel = document.createElement('div');
         panel.className = 'gmm-panel';
@@ -69,11 +82,12 @@
             ev.stopPropagation();
             const act = b.getAttribute('data-act');
             if (act === 'close') togglePanel(false);
+            else if (act === 'perf') togglePerf();
             renderPanel();
         });
         document.body.appendChild(panel);
 
-        S.ui = { hud, reticle, toasts, reticleLabel: reticle.querySelector('span'), panel };
+        S.ui = { hud, reticle, toasts, reticleLabel: reticle.querySelector('span'), panel, perf };
     }
 
     // 'shift+q' -> 'MAJ+Q' pour l'affichage ; un tableau est listé.
