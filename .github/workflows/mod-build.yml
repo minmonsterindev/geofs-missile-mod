@@ -1,0 +1,51 @@
+name: mod — parties générées depuis src
+
+# `src/geofs-missile-mod.js` est la source unique et lisible du mod.
+# `mod/1.js` … `mod/8.js` n'ont pas à être édités à la main : ils sont
+# régénérés ici à chaque modification de la source, et sur demande manuelle.
+#
+# Au premier passage, si `src/` n'existe pas encore, il est reconstitué depuis
+# les huit parties déjà publiées (amorçage unique), puis la découpe est
+# normalisée. Les poussées faites avec le jeton d'Actions ne relancent pas de
+# workflow : pas de boucle.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/geofs-missile-mod.js'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Amorçage de src/ (une seule fois)
+        run: |
+          if [ ! -f src/geofs-missile-mod.js ]; then
+            echo "src/ absent : reconstitution depuis mod/1..8"
+            node tools/build.js --from-parts
+          fi
+
+      - name: Régénérer les parties
+        run: node tools/build.js
+
+      - name: Committer si quelque chose a changé
+        run: |
+          if [ -z "$(git status --porcelain -- src mod)" ]; then
+            echo "src/ et mod/ sont déjà à jour."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src mod
+          git commit -m 'mod : parties régénérées depuis src/geofs-missile-mod.js'
+          git push
