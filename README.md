@@ -4,12 +4,16 @@ Missiles air-air et bombes pour les avions militaires de [GeoFS](https://www.geo
 100 % autonome : aucun modèle 3D ni texture externe, tout est généré (géométrie Cesium et
 couleurs par instance).
 
-Version **1.23.1** : le mod **ne fournit plus d'avion**. Le MiG-31 LEGO est retiré et vit
+Version **1.23.2** : le mod **ne fournit plus d'avion**. Le MiG-31 LEGO est retiré et vit
 désormais dans son propre projet ; les fichiers de `assets/mig31/` restent dans le dépôt mais
 plus rien ne les charge. Le rendu des munitions a été refait : les pièces ne sont plus des
 entités dynamiques (Cesium détruisait et recréait une primitive par pièce **à chaque image**),
 mais des géométries cuites une fois dans un seul `Primitive` par munition. Le script se met à
 jour tout seul depuis GitHub.
+
+La 1.23.2 ajoute de quoi **mesurer** ce gain en jeu (compteur FPS et appels de dessin dans le
+panneau), prévient visiblement si une partie du code ne se charge pas, et fait de
+`src/geofs-missile-mod.js` la source unique du mod.
 
 ## Installation (Tampermonkey)
 
@@ -33,7 +37,7 @@ chargement, garder l'ancien script installé ne gêne pas.
 3. Le script porte `@updateURL` / `@downloadURL` : Tampermonkey le met à jour tout seul
    (Tableau de bord → **Paramètres → Vérifier les mises à jour**, par défaut toutes les 12 h).
 
-La console (`F12`) affiche `[MissileMod] v1.23.1 prêt`.
+La console (`F12`) affiche `[MissileMod] v1.23.2 prêt`.
 
 ## Commandes
 
@@ -202,7 +206,7 @@ JavaScript.
 
 La géométrie rendue est identique à l'ancienne : écart mesuré **1,3 × 10⁻⁹ m** sur
 206 orientations × 30 pièces, et 8,3 × 10⁻¹⁶ sur les rotations (`.tooling/test-munition-math.js`).
-Le smoke test charge le userscript complet dans jsdom avec le vrai Cesium : 86 pièces,
+Le smoke test charge le mod complet dans jsdom avec le vrai Cesium : 86 pièces,
 **10 primitives, 0 entité dynamique**, tir, réarmement, largage et suivi de la rotation.
 
 Autres sources de lag traitées :
@@ -220,6 +224,38 @@ GeoFS range l'avion courant dans `localStorage.flight`. Une ancienne version y l
 9917 de l'avion bonus retiré : l'enregistrement est réparé au chargement
 (`cleanStaleAircraftId`), sinon le jeu échouerait au lancement suivant avec « Could not load
 aircraft file ».
+
+## Mesurer le gain anti-lag (1.23.2)
+
+Le panneau **Armement** contient une ligne **Compteur** avec le bouton `FPS · dessin`. Activé,
+il affiche en haut à gauche : les images par seconde (moyenne sur 500 ms), le **minimum**
+observé depuis l'activation, et le nombre d'**appels de dessin** de la dernière image rendue
+(`viewer.scene.frameState.commandList.length`).
+
+C'est la mesure qui compte pour ce mod : le rendu par `Primitive` ne promet pas des FPS
+magiques, il promet **un appel de dessin par munition** au lieu d'une entité dynamique par
+pièce. Avec un B-52 chargé (20 bombes), le total doit être plus bas d'environ 80 appels qu'avec
+l'ancien rendu, et le minimum ne doit plus s'effondrer quand l'avion est à l'arrêt. Compteur
+fermé, rien n'est calculé : deux lectures de propriétés par image, aucun impact mesurable.
+
+## Source, parties et génération
+
+`src/geofs-missile-mod.js` est **la source unique et lisible** du mod. `mod/1.js` … `mod/8.js`
+ne s'éditent pas à la main : ce sont des tranches de ce fichier, coupées au début d'une ligne
+vide, que l'amorce [`geofs-missile-mod.user.js`](geofs-missile-mod.user.js) télécharge en
+parallèle puis exécute d'un seul tenant (le arguard « déjà chargé » reste dans la partie 1). Si
+une partie manque, un **bandeau rouge** apparaît en haut de la page et le mod ne démarre pas :
+mieux vaut ça qu'un démarrage silencieusement incomplet.
+
+```bash
+node tools/build.js               # src/ -> mod/1.js … mod/8.js
+node tools/build.js --from-parts  # amorçage inverse, une seule fois
+```
+
+`tools/build.js` vérifie que la concaténation redonne `src/` à l'octet près et que le source
+compile **avant** d'écrire quoi que ce soit. Le workflow
+`.github/workflows/mod-build.yml` relance la génération à chaque modification de `src/` et
+commite les parties : on ne maintient donc qu'un seul fichier.
 
 ## Fonctionnement
 
@@ -316,4 +352,4 @@ masse), pas mesurés en jeu.
 
 Un bouton **Armement** est ajouté dans la barre du bas de GeoFS, entre
 « Location » et « Camera ». Il ouvre un panneau qui résume l'état de
-l'armement, le chargement et les touches.
+l'armement, le chargement, les touches et le compteur FPS.
