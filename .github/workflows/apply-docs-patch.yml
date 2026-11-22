@@ -1,7 +1,8 @@
 name: publication — documentation 1.23.3
 
-# Restaure tools/docs.patch.gz.b64, applique le correctif (README + amorce),
-# régénère les parties, puis supprime tout : ce workflow ne sert qu'une fois.
+# tools/docs.patch.gz.b64 contient en fait l'archive gzip du correctif
+# (README + amorce). On la restaure, on l'applique, on régénère les parties,
+# puis on supprime tout : ce workflow ne sert qu'une fois.
 
 on:
   workflow_dispatch:
@@ -21,7 +22,7 @@ jobs:
 
       - name: Restaurer et appliquer le correctif
         run: |
-          base64 -d tools/docs.patch.gz.b64 | gunzip > tools/docs.patch
+          gunzip -c tools/docs.patch.gz.b64 > tools/docs.patch
           rm tools/docs.patch.gz.b64
           git apply --verbose tools/docs.patch
           rm tools/docs.patch
