@@ -1,0 +1,39 @@
+name: publication — documentation 1.23.3
+
+# Applique tools/docs.patch (README + amorce), régénère les parties, puis
+# supprime le correctif et ce workflow : il ne sert qu'une fois.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Appliquer le correctif
+        run: |
+          git apply --verbose tools/docs.patch
+          rm tools/docs.patch
+
+      - name: Vérifier la source et régénérer les parties
+        run: |
+          node --check src/geofs-missile-mod.js
+          node tools/build.js
+
+      - name: Committer et retirer le workflow ponctuel
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -q .github/workflows/apply-docs-patch.yml
+          git add -A README.md geofs-missile-mod.user.js src mod tools .github/workflows
+          git commit -m 'docs 1.23.3 : protocole de mesure du compteur'
+          git push
