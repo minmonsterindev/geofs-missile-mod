@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GeoFS — Missile & Bomb Mod (avions militaires)
 // @namespace    geofs-missile-mod
-// @version      1.22.1
-// @updated      2026-11-20
+// @version      1.23.0
+// @updated      2026-11-22
 // @description  Missiles air-air et bombes pour les avions militaires de GeoFS : ciblage des joueurs, guidage, explosion, calibrage des points d'emport, HUD.
 // @author       Buffy
 // @updateURL    https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/geofs-missile-mod.user.js
@@ -23,7 +23,7 @@
     }
     window.__GMM_MISSILE_MOD__ = true;
 
-    const VERSION = '1.22.1';
+    const VERSION = '1.23.0';
 
     /* =========================== CONFIGURATION ===========================
        Tout ce qui suit est réglable sans toucher au reste du script.       */
@@ -41,8 +41,7 @@
             type: '*',
             target: 'u',
             reload: 'd',
-            calibrate: 'shift+d',
-            bonus: 'k'
+            calibrate: 'shift+d'
             // Pas de raccourci pour le panneau : « u » sert déjà aux cibles et
             // les autres lettres libres sont rares. Le bouton de la barre suffit.
         },
@@ -187,6 +186,8 @@
         targetId: null,
         lastFrame: 0,
         hudAt: 0,
+        frameSeq: 0,         // compteur de ticks
+        frameNo: 0,          // numéro de l'image de rendu (clé du cache des munitions)
         cal: {},
         calMode: false,
         panelOpen: false,
@@ -199,7 +200,10 @@
 
     /* ============================ UTILITAIRES =========================== */
 
-    const C = () => window.Cesium;
+    // Cesium est relu à chaque rappel de rendu : on garde la référence plutôt
+    // que de repasser par window (WindowProxy) des centaines de fois par image.
+    let CES = null;
+    const C = () => (CES || (CES = window.Cesium));
     const viewer = () => window.geofs.api.viewer;
     const mp = () => window.multiplayer || {};
 
@@ -549,7 +553,6 @@
             '.gmm-btn:hover{background:rgba(57,255,136,.24)}',
             '.gmm-btn.small{padding:1px 7px;min-width:22px}',
             '.gmm-btn.actif{background:rgba(57,255,136,.42);border-color:#39ff88;color:#04120a;font-weight:700}',
-            '.gmm-panel .choix{display:flex;gap:6px}',
             '.gmm-x{position:absolute;right:6px;top:3px;padding:2px 7px;background:none;border:0;',
             'color:#5c8f72;font:14px/1 ui-monospace,monospace;cursor:pointer}',
             '.gmm-x:hover{color:#eafff2}'
@@ -578,10 +581,7 @@
             ev.preventDefault();
             ev.stopPropagation();
             const act = b.getAttribute('data-act');
-            if (act === 'bonus') toggleBonus();
-            else if (act === 'close') togglePanel(false);
-            else if (act === 'modele-geofs') bonusRestore();
-            else if (act === 'modele-lego') bonusLoadModel();
+            if (act === 'close') togglePanel(false);
             renderPanel();
         });
         document.body.appendChild(panel);
@@ -663,7 +663,7 @@
                 return R;
             };
             const boxes = [];
-            const pboxes = [];       // une boîte par primitive (par pièce LEGO)
+            const pboxes = [];       // une boîte par primitive (pièce de maillage)
             const walk = (idx, parent) => {
                 const n = gl.nodes[idx];
                 if (!n) return;
@@ -751,7 +751,7 @@
 
     // Corde et dessous de voilure à une station donnée, lus dans les plaques
     // du maillage. Sert quand l'aile n'est pas une boîte unique : une aile en
-    // briques (MiG-31 LEGO) est découpée en dizaines de plaques, et poser les
+    // briques est découpée en dizaines de plaques, et poser les
     // missiles à une fraction de la demi-longueur les faisait flotter devant
     // le bord d'attaque, hors de l'aile.
     function wingUnder(plates, xAbs, droop) {
@@ -840,11 +840,11 @@
     // on ne refait pas dix fois la même matrice.
     const frameCache = { n: -1, fr: null };
     function currentFrame() {
-        const v = window.geofs && geofs.api && geofs.api.viewer;
-        const n = (v && v.scene && v.scene.frameState) ? v.scene.frameState.frameNumber : -1;
-        if (n >= 0 && n === frameCache.n) return frameCache.fr;
+        const n = renderFrameNumber();
+        if (n === frameCache.n && frameCache.fr) return frameCache.fr;
         const fr = playerFrame();
-        if (n >= 0) { frameCache.n = n; frameCache.fr = fr; }
+        frameCache.n = n;
+        frameCache.fr = fr;
         return fr;
     }
 
@@ -976,42 +976,115 @@
     }
 
     /* =========================== MODÈLES 3D ============================ */
-    // Une munition = plusieurs primitives Cesium alignées sur un même axe :
+    // Une munition = plusieurs primitives Cesium rigides autour d'un même axe :
     // corps, ogive, ceinture, culot, tuyère, ailettes. Repère local : z le long
     // de l'arme, x vers l'ailette de roulis demandée. Tout est paramétrique,
     // aucun fichier 3D à télécharger.
+    //
+    // PERFORMANCES. Avant, chaque pièce recalculait sa position ET son
+    // orientation depuis zéro à chaque évaluation : produit vectoriel,
+    // normalisations, sin/cos, matrice 3×3 puis quaternion. Cesium demande ces
+    // propriétés plusieurs fois par image et par pièce, si bien qu'un B-52
+    // (20 bombes × 10 pièces = 200 pièces) déclenchait des milliers de calculs
+    // et d'allocations par image, d'où le lag même sans tirer.
+    // Désormais la base de la munition (droite R, haut U, quaternion) est
+    // calculée UNE fois par image et par munition puis mise en cache ; chaque
+    // pièce ne fait plus qu'un décalage le long de cette base, avec un roulis
+    // (cos, sin, quaternion) calculé une seule fois à la construction.
 
-    // Orientation d'une pièce : z sur l'axe de l'arme, x vers le rayon choisi.
-    function modelQuat(getDir, deg) {
+    const UNIT_UP = { v: null };
+    function unitUp() {
+        if (!UNIT_UP.v) UNIT_UP.v = new (C().Cartesian3)(0, 0, 1);
+        return UNIT_UP.v;
+    }
+
+    // Numéro de l'image de rendu : c'est la clé du cache ci-dessous. Il est
+    // relevé UNE fois par tick (voir tick) au lieu d'être relu par chaque
+    // pièce, ce qui coûtait des centaines de traversées de `window` par image.
+    // Le compteur de tick prend le relais si Cesium n'expose pas `frameNumber`.
+    function readFrameNumber() {
+        const v = window.geofs && geofs.api && geofs.api.viewer;
+        const fs = v && v.scene && v.scene.frameState;
+        const n = fs && fs.frameNumber;
+        return (typeof n === 'number' && isFinite(n)) ? n : S.frameSeq;
+    }
+    function renderFrameNumber() {
+        return S.frameNo;
+    }
+
+    // Base de la munition pour l'image courante : avant (F), droite (R), haut
+    // (U) et le quaternion correspondant, partagés par toutes ses pièces.
+    function weaponFrame(w) {
         const Cesium = C();
-        const F = getDir();
-        if (!F) return Cesium.Quaternion.IDENTITY;
-        const up = new Cesium.Cartesian3(0, 0, 1);
-        const R = Cesium.Cartesian3.cross(up, F, new Cesium.Cartesian3());
-        if (Cesium.Cartesian3.magnitude(R) < 1e-5) Cesium.Cartesian3.clone(new Cesium.Cartesian3(1, 0, 0), R);
-        Cesium.Cartesian3.normalize(R, R);
-        const U = Cesium.Cartesian3.normalize(Cesium.Cartesian3.cross(F, R, new Cesium.Cartesian3()), new Cesium.Cartesian3());
-        const rad = (deg || 0) * Math.PI / 180;
-        const cr = Math.cos(rad), sr = Math.sin(rad);
-        const X = new Cesium.Cartesian3(R.x * cr + U.x * sr, R.y * cr + U.y * sr, R.z * cr + U.z * sr);
-        const Y = Cesium.Cartesian3.cross(F, X, new Cesium.Cartesian3());
-        try {
-            const m = Cesium.Matrix3.fromColumnMajorArray(
-                [X.x, X.y, X.z, Y.x, Y.y, Y.z, F.x, F.y, F.z],
-                new Cesium.Matrix3()
-            );
-            return Cesium.Quaternion.fromRotationMatrix(m, new Cesium.Quaternion());
-        } catch (e) {
-            return quatFromZ(F);
+        const n = renderFrameNumber();
+        if (w.fn === n && w.F) return w;
+        const F = w.getDir();
+        if (!F) return w;
+        if (!w.F) {
+            w.F = new Cesium.Cartesian3();
+            w.R = new Cesium.Cartesian3();
+            w.U = new Cesium.Cartesian3();
+            w.base = new Cesium.Quaternion();
+            w.m3 = new Cesium.Matrix3();
         }
+        w.fn = n;
+        Cesium.Cartesian3.clone(F, w.F);
+        Cesium.Cartesian3.cross(unitUp(), w.F, w.R);
+        if (Cesium.Cartesian3.magnitude(w.R) < 1e-5) {
+            w.R.x = 1;
+            w.R.y = 0;
+            w.R.z = 0;
+        }
+        Cesium.Cartesian3.normalize(w.R, w.R);
+        Cesium.Cartesian3.cross(w.F, w.R, w.U);
+        Cesium.Cartesian3.normalize(w.U, w.U);
+        // Matrice (R, U, F) en colonnes : z local sur l'axe de l'arme.
+        w.m3[0] = w.R.x;
+        w.m3[1] = w.R.y;
+        w.m3[2] = w.R.z;
+        w.m3[3] = w.U.x;
+        w.m3[4] = w.U.y;
+        w.m3[5] = w.U.z;
+        w.m3[6] = w.F.x;
+        w.m3[7] = w.F.y;
+        w.m3[8] = w.F.z;
+        Cesium.Quaternion.fromRotationMatrix(w.m3, w.base);
+        return w;
+    }
+
+    // Centre d'une pièce : centre de la munition + dz sur l'axe + le rayon
+    // (R·cos + U·sin) × dr. Aucune trigonométrie ni normalisation ici.
+    function partPosition(w, p) {
+        const Cesium = C();
+        const b = weaponFrame(w);
+        const pos = b.F ? w.getPos() : null;
+        if (!pos || !b.F) return Cesium.Cartesian3.fromDegrees(0, 0, 0);
+        if (!p.pos) p.pos = new Cesium.Cartesian3();
+        const rx = b.R.x * p.cr + b.U.x * p.sr;
+        const ry = b.R.y * p.cr + b.U.y * p.sr;
+        const rz = b.R.z * p.cr + b.U.z * p.sr;
+        p.pos.x = pos.x + b.F.x * p.dz + rx * p.dr;
+        p.pos.y = pos.y + b.F.y * p.dz + ry * p.dr;
+        p.pos.z = pos.z + b.F.z * p.dz + rz * p.dr;
+        return p.pos;
+    }
+
+    // Orientation d'une pièce : base de la munition × roulis figé de la pièce.
+    function partOrientation(w, p) {
+        const Cesium = C();
+        const b = weaponFrame(w);
+        if (!b.base) return Cesium.Quaternion.IDENTITY;
+        if (!p.ql) p.ql = new Cesium.Quaternion();
+        Cesium.Quaternion.multiply(b.base, p.qz, p.ql);
+        return p.ql;
     }
 
     // Assemble une munition. getPos() = centre du corps, getDir() = axe avant,
-    // tous deux réévalués par Cesium à chaque rendu (voir currentFrame).
+    // tous deux lus pendant le rendu (voir weaponFrame).
     function buildModel(getPos, getDir, t, isBomb) {
         const Cesium = C();
         const v = viewer();
-        const parts = [];
+        const w = { getPos: getPos, getDir: getDir, parts: [], entities: [], fn: -2, F: null };
         const r = (t.caliber || 0.18) / 2;
         const L = t.length || 3.6;
         const noseLen = t.noseLen || 0.6;
@@ -1021,33 +1094,27 @@
         const finChord = t.finChord || 0.36;
         const solid = css => Cesium.Color.fromCssColorString(css);
 
-        // Un point du modèle : dz le long de l'axe, dr en rayon, deg en roulis.
-        function pointAt(dz, dr, deg) {
-            const p = getPos();
-            const F = getDir();
-            if (!p || !F) return Cesium.Cartesian3.fromDegrees(0, 0, 0);
-            const up = new Cesium.Cartesian3(0, 0, 1);
-            const R = Cesium.Cartesian3.cross(up, F, new Cesium.Cartesian3());
-            if (Cesium.Cartesian3.magnitude(R) < 1e-5) Cesium.Cartesian3.clone(new Cesium.Cartesian3(1, 0, 0), R);
-            Cesium.Cartesian3.normalize(R, R);
-            const U = Cesium.Cartesian3.normalize(Cesium.Cartesian3.cross(F, R, new Cesium.Cartesian3()), new Cesium.Cartesian3());
-            const rad = (deg || 0) * Math.PI / 180;
-            const cr = Math.cos(rad), sr = Math.sin(rad);
-            return new Cesium.Cartesian3(
-                p.x + F.x * dz + (R.x * cr + U.x * sr) * dr,
-                p.y + F.y * dz + (R.y * cr + U.y * sr) * dr,
-                p.z + F.z * dz + (R.z * cr + U.z * sr) * dr
-            );
-        }
-
+        // Une pièce : décalage fixe (dz sur l'axe, dr en rayon, deg en roulis).
         function add(dz, dr, deg, geom) {
             try {
-                const desc = {
-                    position: new Cesium.CallbackProperty(() => pointAt(dz, dr, deg), false),
-                    orientation: new Cesium.CallbackProperty(() => modelQuat(getDir, deg), false)
+                const rad = (deg || 0) * Math.PI / 180;
+                const p = {
+                    dz: dz,
+                    dr: dr,
+                    cr: Math.cos(rad),
+                    sr: Math.sin(rad),
+                    qz: Cesium.Quaternion.fromAxisAngle(unitUp(), rad, new Cesium.Quaternion()),
+                    pos: null,
+                    ql: null
                 };
-                Object.keys(geom).forEach(k => { desc[k] = geom[k]; });
-                parts.push(v.entities.add(desc));
+                const desc = {
+                    position: new Cesium.CallbackProperty(function () { return partPosition(w, p); }, false),
+                    orientation: new Cesium.CallbackProperty(function () { return partOrientation(w, p); }, false)
+                };
+                Object.keys(geom).forEach(function (k) { desc[k] = geom[k]; });
+                p.e = v.entities.add(desc);
+                w.parts.push(p);
+                w.entities.push(p.e);
             } catch (e) { }
         }
 
@@ -1111,7 +1178,7 @@
             });
         }
 
-        return parts;
+        return w;
     }
 
     function buildMissile(getPos, getDir, t) {
@@ -1122,14 +1189,33 @@
         return buildModel(getPos, getDir, BOMB_TYPE, true);
     }
 
+    // Retire du rendu toutes les entités d'une munition. Cesium continuait à
+    // suivre les missiles simplement masqués : les supprimer les rend gratuits.
+    function freeModel(w) {
+        const v = viewer();
+        ((w && w.entities) || []).forEach(function (e) { try { v.entities.remove(e); } catch (err) { } });
+        if (w) { w.entities = []; w.parts = []; }
+    }
+
+    // Un emport vide est retiré du rendu au lieu de rester invisible à suivre
+    // l'avion à chaque image : un missile tiré ne coûte alors plus rien, et le
+    // réarmement reconstruit les emports manquants.
+    function dropStation(st) {
+        freeModel(st.model);
+        st.parts = [];
+        st.model = null;
+        st.used = true;
+    }
+
     function makeHardpoint(st, kind) {
-        const dir = () => {
+        const dir = function () {
             const fr = currentFrame();
             return fr ? fr.F : null;
         };
-        st.parts = kind === 'missile'
-            ? buildMissile(() => stationPos(st), dir, currentType())
-            : buildBomb(() => stationPos(st), dir);
+        st.model = kind === 'missile'
+            ? buildMissile(function () { return stationPos(st); }, dir, currentType())
+            : buildBomb(function () { return stationPos(st); }, dir);
+        st.parts = st.model.entities;
     }
 
     function buildStations(profile) {
@@ -1395,10 +1481,7 @@
 
         const st = S.stations.find(s => !s.used);
         const pos = st ? stationPos(st, fr) : offsetPos(fr, 0, 2.5, -1);
-        if (st) {
-            st.used = true;
-            (st.parts || []).forEach(e => { try { e.show = false; } catch (err) { } });
-        }
+        if (st) dropStation(st);
         if (!pos) return;
 
         const ac = geofs.aircraft.instance;
@@ -1448,7 +1531,7 @@
 
     function removeMissile(m) {
         const v = viewer();
-        (m.vis.parts || []).forEach(e => { try { v.entities.remove(e); } catch (err) { } });
+        freeModel(m.vis && m.vis.parts);
         try { v.entities.remove(m.vis.flame); } catch (e) { }
         try { v.entities.remove(m.trail); } catch (e) { }
     }
@@ -1539,8 +1622,7 @@
         const pos0 = stationPos(st, fr);
         if (!pos0) return;
 
-        st.used = true;
-        (st.parts || []).forEach(e => { try { e.show = false; } catch (err) { } });
+        dropStation(st);
 
         const ac = geofs.aircraft.instance;
         const speed = ac.trueSpeed || ac.groundSpeed || 0;
@@ -1564,7 +1646,7 @@
             t: 0
         };
 
-        v.parts = buildBomb(() => v.pos, () => v.dir);
+        v.model = buildBomb(() => v.pos, () => v.dir);
 
         S.bombsInAir.push(v);
         S.bombs--;
@@ -1595,7 +1677,7 @@
             const impact = carto && (alt - groundHeight(carto)) < 2.5;
 
             if (impact || b.t > CFG.bombLifetime) {
-                (b.parts || []).forEach(e => { try { viewer().entities.remove(e); } catch (err) { } });
+                freeModel(b.model);
                 S.bombsInAir.splice(i, 1);
                 spawnExplosion(b.pos, impact ? 2.0 : 1.0);
             }
@@ -1719,8 +1801,7 @@
             '[' + keyLabel(CFG.keys.target) + '] cible &nbsp; ' +
             '[' + keyLabel(CFG.keys.bomb) + '] bombe<br>' +
             '[' + keyLabel(CFG.keys.reload) + '] réarmer &nbsp; ' +
-            '[' + keyLabel(CFG.keys.calibrate) + '] calibrage &nbsp; ' +
-            '[' + keyLabel(CFG.keys.bonus) + '] LEGO &nbsp; ' +
+            '[' + keyLabel(CFG.keys.calibrate) + '] calibrage' +
             '</div>';
         // Réécrire le HUD à chaque image coûtait un reflow complet plusieurs
         // fois par seconde (source du lag chez certains joueurs). On construit
@@ -1744,14 +1825,13 @@
 
         S.profile = detectProfile(name);
         S.geo = aircraftGeometry(S.profile || GENERIC_FRAME);
-        // la hauteur du modèle LEGO dépend du ventre de CET avion
+        // les emports dépendent des dimensions de CET avion
         clearStations();
         buildStations(S.profile);
+        wingTries = 0;
         S.targetId = null;
         S.armed = false;
         updateHUD();
-        // Le modèle choisi est réappliqué à chaque changement d'avion.
-        if (name !== BONUS.name) { BONUS.active = false; BONUS.saved = null; }
         if (S.profile) {
             log('Avion détecté : ' + name + ' (' + S.profile.name + ', ' + S.geo.halfSpan.toFixed(1) + ' m de demi-envergure)');
             toast('Emports disponibles — [' + CFG.keys.arm.toUpperCase() + '] pour armer', '#39ff88');
@@ -1761,13 +1841,17 @@
     // Le maillage arrive après le changement d'avion : si la boîte d'aile
     // manquait au moment du calcul, on réessaie (deux fois par seconde) et on
     // replace les emports dès qu'on l'a.
-    let wingAt = 0;
+    // Bornée : au-delà de six essais le maillage ne viendra plus, et parcourir
+    // tout le glTF deux fois par seconde pour rien coûtait un à-coup régulier.
+    let wingAt = 0, wingTries = 0;
     function retryWingBox() {
         if (!S.profile) return;
         if (S.geo.wing && S.geo.plates) return;
+        if (wingTries >= 6) return;
         const now = performance.now();
         if (now - wingAt < 500) return;
         wingAt = now;
+        wingTries++;
         const m = meshWing();
         if (!m) return;
         const gotBox = !S.geo.wing && m.box;
@@ -1781,6 +1865,8 @@
 
     function tick() {
         if (!S.ready) return;
+        S.frameSeq++;
+        S.frameNo = readFrameNumber();
         const now = performance.now();
         const dt = Math.min(0.1, (now - (S.lastFrame || now)) / 1000);
         S.lastFrame = now;
@@ -1799,504 +1885,21 @@
         }
     }
 
-    /* ==================== AVION BONUS (MiG-31 LEGO) ==================== */
-    // Même principe que l'addon « GeoFS Extra Vehicles » : un avion GeoFS est
-    // décrit par un aircraft.json complet (ailes, moteurs, train, points de
-    // collision, caméras) et se charge avec parseRecord() puis init(). Le glTF
-    // n'est donc plus un calque posé sur un autre avion : c'est le maillage de
-    // l'avion lui-même, avec sa physique.
-    const BONUS = {
-        // jsDelivr en premier : c'est le même dépôt GitHub, mais servi par un
-        // CDN avec un cache long. raw.githubusercontent.com n'annonce que 5 min
-        // de cache, si bien que chaque bascule retéléchargeait les 9,4 Mo du
-        // maillage ; c'est aussi le premier bloqué par certains réseaux.
-        base: 'https://cdn.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/',
-        mirror: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31/',
-        // Sources essayées dans l'ordre. Un réseau filtré (école, entreprise)
-        // bloque souvent un hôte sans prévenir : chaque source n'est essayée
-        // que si sa définition arrive vraiment, et les domaines jsDelivr
-        // alternatifs servent exactement le même dépôt.
-        mirrors: [
-            // GitHub d'abord : les CDN gardent `@main` en cache plusieurs
-            // heures, donc une correction de définition peut arriver en retard
-            // (l'avion reste alors avec les anciens réglages de vol).
-            { name: 'GitHub', base: 'https://raw.githubusercontent.com/minmonsterindev/geofs-missile-mod/main/assets/mig31/' },
-            { name: 'jsDelivr', base: 'https://cdn.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/' },
-            { name: 'jsDelivr Fastly', base: 'https://fastly.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/' },
-            { name: 'jsDelivr Gcore', base: 'https://gcore.jsdelivr.net/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/' },
-            { name: 'GitHack', base: 'https://raw.githack.com/minmonsterindev/geofs-missile-mod/main/assets/mig31/' },
-            { name: 'Statically', base: 'https://cdn.statically.io/gh/minmonsterindev/geofs-missile-mod@main/assets/mig31/' }
-        ],
-        id: 9917,
-        name: 'MiG-31 Foxhound (LEGO)',
-        active: false,
-        loading: false,
-        status: '',               // texte de progression affiché dans le panneau
-        error: '',                // dernier échec, gardé visible dans le panneau
-        saved: null              // avion d'origine, pour pouvoir revenir
-    };
-
-    // GeoFS charge un avion en trois temps (instance.load) : une entrée dans
-    // `geofs.aircraftList`, la lecture de `<path>aircraft.json`, puis
-    // `parseRecord()` + `init()`. Avec `local: true`, `load()` lit directement
-    // `<path>aircraft.json` au lieu de passer par load.php. On enregistre donc
-    // le MiG exactement comme un avion du jeu et on laisse GeoFS construire
-    // l'appareil (maillage, pièces, physique, instruments, train) : c'est le
-    // même chemin que le menu « Aircraft », plus aucun init() manuel.
-    function bonusRegister(base) {
-        if (!window.geofs || !geofs.aircraftList) return false;
-        geofs.aircraftList[BONUS.id] = {
-            name: BONUS.name,
-            dir: '|assets|mig31|',
-            multiplayerFiles: '',
-            community: 0,
-            path: base || BONUS.base,
-            local: true
-        };
-        return true;
-    }
-
-    // `parts.body` existe dès que la définition est lue, même si le .glb n'est
-    // jamais arrivé : on se retrouvait avec un avion invisible autour duquel les
-    // missiles flottaient. On attend donc le vrai maillage Cesium.
-    function bonusMeshReady(inst) {
-        // L'identité compte aussi : quand la définition ne se lit pas, GeoFS
-        // retombe sur l'avion par défaut, dont le maillage existe bel et bien.
-        if (!inst || String(inst.id) !== String(BONUS.id)) return false;
-        const o = inst.parts && inst.parts.body && inst.parts.body.object3d;
-        const mdl = o && o.model;
-        const m = mdl && mdl._model;
-        if (!mdl || !m) return false;
-        // Juste après une bascule, l'objet 3D porte encore le modèle de l'avion
-        // précédent : seul un GLB du MiG prouve que le bon maillage est là.
-        const url = String((m._resource && m._resource.url) || m._url || '');
-        if (!/mig31/i.test(url)) return false;
-        // Cesium marque le modèle prêt quand les sommets et la sphère
-        // englobante sont chargés — c'est le maillage, pas la définition.
-        if (mdl.ready !== true) return false;
-        const bs = m._boundingSphere || mdl.boundingSphere;
-        const r = bs && bs.radius;
-        return !!(r && r > 2 && r < 200);
-    }
-
-    // Cesium construit les 1183 primitives du GLB : sur une machine modeste
-    // cela prend des dizaines de secondes, sans le moindre signe. On attend
-    // donc en affichant un compteur plutôt que de relancer un téléchargement.
-    function bonusWaitMesh(inst, ms, onTick) {
-        const t0 = performance.now();
-        return new Promise(resolve => {
-            const step = () => {
-                if (bonusMeshReady(inst)) return resolve(true);
-                const s = Math.round((performance.now() - t0) / 1000);
-                if (performance.now() - t0 > ms) return resolve(false);
-                // GeoFS est retombé sur un autre avion : inutile d'attendre.
-                if (String(inst.id) !== String(BONUS.id)) return resolve(false);
-                if (onTick) { try { onTick(s); } catch (e) { } }
-                setTimeout(step, 500);
-            };
-            step();
-        });
-    }
-
-    // GeoFS accepte une définition en posant `this.id` puis en appelant init().
-    // Or init() peut lever au milieu (caméra pas encore initialisée, instrument)
-    // après avoir déjà posé l'avion : dans ce cas la promesse de change() ne se
-    // résout jamais. On surveille donc l'id, seul signe fiable que le jeu a pris
-    // la définition, quelle que soit la suite.
-    function bonusWaitAccepted(inst, ms) {
-        const t0 = performance.now();
-        return new Promise(resolve => {
-            const step = () => {
-                if (String(inst.id) === String(BONUS.id)) return resolve(true);
-                if (performance.now() - t0 > ms) return resolve(false);
-                setTimeout(step, 200);
-            };
-            step();
-        });
-    }
-
-    // Charge l'avion depuis `base`.
-    //   def : la définition a bien été construite par GeoFS (id 9917)
-    //   ok  : le maillage est réellement affiché
-    function bonusTryLoad(inst, base, onTick) {
-        if (!bonusRegister(base)) return Promise.resolve({ def: false, ok: false });
-        try {
-            const p = inst.change(BONUS.id, undefined, true);
-            if (p && p.catch) p.catch(e => warn('changement d\'avion', e));
-        } catch (e) {
-            warn('changement d\'avion', e);
-        }
-        return bonusWaitAccepted(inst, 6000).then(def => {
-            if (!def) return { def: false, ok: false };
-            return bonusWaitMesh(inst, 90000, onTick).then(ok => ({ def: true, ok: ok }));
-        });
-    }
-
-    // Pour le message d'erreur : le fichier est-il seulement accessible ?
-    // HEAD : on veut le code et la taille, pas les 9,4 Mo.
-    function bonusProbe(url) {
-        return fetch(url, { method: 'HEAD', cache: 'no-store' }).then(r => {
-            if (!r.ok) return 'HTTP ' + r.status;
-            const len = parseInt(r.headers.get('content-length') || '0', 10);
-            return len ? 'OK ' + (len / 1048576).toFixed(1) + ' Mo' : 'OK';
-        }).catch(() => 'bloqué');
-    }
-
-    // GeoFS range l'avion courant dans localStorage 'flight' (avec la dernière
-    // position) et le recharge au démarrage. Garder l'id 9917 y laisserait un id
-    // qui n'existe pas hors session : au lancement suivant, GeoFS échoue sur
-    // « Could not load aircraft file » et repart sur l'avion par défaut. On remet
-    // donc l'id de l'avion d'origine, sur l'instance (c'est lui qui est réécrit
-    // ensuite) et dans l'enregistrement déjà écrit.
-    function bonusKeepSavedId(id) {
-        const inst = geofs.aircraft.instance;
-        try { inst.id = id; } catch (e) { }
+    // Une ancienne version enregistrait l'id 9917 (avion bonus retiré du mod)
+    // dans la sauvegarde de vol : GeoFS échouerait au lancement suivant avec
+    // « Could not load aircraft file ». On répare cet enregistrement.
+    function cleanStaleAircraftId() {
         try {
             const raw = localStorage.getItem('flight');
             if (!raw) return;
             const f = JSON.parse(raw);
-            if (!f || String(f.aircraftId) === String(id)) return;
-            f.aircraftId = String(id);
-            localStorage.setItem('flight', JSON.stringify(f));
-        } catch (e) {
-            warn('enregistrement de vol', e);
-        }
-    }
-
-    // Répare un enregistrement laissé par une version précédente (1.19.3 et
-    // 1.19.4 y sauvegardaient l'id 9917) : sans ça, le jeu affiche l'erreur à
-    // chaque démarrage.
-    function bonusCleanStaleId() {
-        try {
-            const raw = localStorage.getItem('flight');
-            if (!raw) return;
-            const f = JSON.parse(raw);
-            if (!f || String(f.aircraftId) !== String(BONUS.id)) return;
+            if (!f || String(f.aircraftId) !== '9917') return;
             f.aircraftId = String(geofs.aircraft.default);
             localStorage.setItem('flight', JSON.stringify(f));
-            log('enregistrement de vol : id ' + BONUS.id + ' inconnu → avion par défaut');
+            log('enregistrement de vol : id 9917 (avion retiré) → avion par défaut');
         } catch (e) {
             warn('enregistrement de vol', e);
         }
-    }
-
-    // Un changement d'avion garde la caméra là où elle était : en vue cockpit
-    // on arrive dans le fuselage, et la vue « chase » y reste collée tant que
-    // l'avion ne bouge pas. On repart donc d'une vue extérieure cadrée.
-    function bonusExteriorView() {
-        try {
-            const c = geofs.camera;
-            if (!c || !c.modes || typeof c.set !== 'function') return;
-            const cur = c.currentDefinition;
-            if (cur && cur.view === 'follow') return;
-            const follow = c.modes.filter(m => m && m.view === 'follow')[0];
-            if (follow) c.set(follow);
-        } catch (e) {
-            warn('caméra bonus', e);
-        }
-    }
-
-    // Téléchargement avec progression. Le corps de la réponse est lu en entier
-    // (donc mis en cache par le navigateur) mais on ne garde rien en mémoire.
-    function bonusPreload(url, onProgress) {
-        return fetch(url, { cache: 'default' }).then(res => {
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            const len = parseInt(res.headers.get('content-length') || '0', 10);
-            if (!res.body || !len || !onProgress) return res.arrayBuffer();
-            const reader = res.body.getReader();
-            let got = 0;
-            return new Promise((resolve, reject) => {
-                const step = () => reader.read().then(({ done, value }) => {
-                    if (done) { resolve(); return; }
-                    got += value.length;
-                    try { onProgress(got, len); } catch (e) { }
-                    step();
-                }).catch(reject);
-                step();
-            });
-        });
-    }
-
-    // GeoFS lit aircraft.json lui-même avec $.ajax. Sur un réseau filtré cette
-    // requête peut échouer alors que la nôtre passe (filtre du proxy sur la
-    // chaîne de requête, réponse en cache…) : le jeu appelle alors
-    // loadDefault('Could not load aircraft file') et l'utilisateur ne voit
-    // qu'un « définition refusée ». On télécharge donc la définition nous-mêmes
-    // et on la remet à GeoFS au moment où il la demande.
-    function bonusFetchDefinition(base) {
-        const url = base + 'aircraft.json?id=' + BONUS.id + '&t=' + Date.now();
-        return fetch(url, { cache: 'no-store' }).then(res => {
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            return res.text();
-        }).then(text => {
-            // Un portail captif ou un filtre répond 200 avec du HTML : on
-            // vérifie que c'est bien la définition avant de la donner au jeu.
-            let d = null;
-            try { d = JSON.parse(text); } catch (e) { throw new Error('page de blocage'); }
-            const p = d && d[0] && d[0].parts;
-            if (!Array.isArray(p) || !p.length) throw new Error('définition invalide');
-            return text;
-        });
-    }
-
-    // Réponse immédiate de $.ajax pour la seule requête aircraft.json de ce
-    // chargement, avec le texte déjà téléchargé.
-    let bonusAjaxRelease = null;
-    function bonusAjaxProvide(text, base) {
-        const $ = window.jQuery || window.$;
-        if (!$ || typeof $.ajax !== 'function' || !$.Deferred) return null;
-        if (bonusAjaxRelease) bonusAjaxRelease();
-        const orig = $.ajax;
-        const stub = function (url, opts) {
-            const u = String(url || '');
-            if (u.indexOf(base) === 0 && u.indexOf('aircraft.json') >= 0) {
-                const d = $.Deferred();
-                setTimeout(() => {
-                    try {
-                        if (opts && opts.success) opts.success(text, 'success', { status: 200, responseText: text });
-                    } catch (e) { warn('définition du MiG-31', e); }
-                    d.resolve(text, 'success', { status: 200 });
-                }, 0);
-                return d.promise();
-            }
-            return orig.apply(this, arguments);
-        };
-        $.ajax = stub;
-        const release = () => {
-            if ($.ajax === stub) $.ajax = orig;
-            if (bonusAjaxRelease === release) bonusAjaxRelease = null;
-        };
-        bonusAjaxRelease = release;
-        return release;
-    }
-
-    // Le GLB ne fait que 1,8 Mo une fois compressé par le CDN, mais le
-    // télécharger au moment de la bascule fait encore attendre sur 4G. Dès que
-    // le joueur a utilisé le MiG une fois, on le remet en cache en tâche de
-    // fond : la bascule suivante n'a plus rien à télécharger.
-    const BONUS_SEEN = 'gmm_mig_seen';
-    function bonusWarmCache() {
-        try { if (localStorage.getItem(BONUS_SEEN) !== '1') return; } catch (e) { return; }
-        setTimeout(() => {
-            if (BONUS.loading) return;
-            const next = i => {
-                if (i >= BONUS.mirrors.length) return;
-                bonusPreload(BONUS.mirrors[i].base + 'mig31-body.glb').catch(() => next(i + 1));
-            };
-            next(0);
-        }, 20000);
-    }
-
-    // load() de GeoFS ne rend jamais la main si init() lève : on borne l'attente.
-    function bonusWithin(promise, ms, label) {
-        return new Promise((resolve, reject) => {
-            const t = setTimeout(() => reject(new Error(label + ' — délai dépassé')), ms);
-            Promise.resolve(promise).then(
-                v => { clearTimeout(t); resolve(v); },
-                e => { clearTimeout(t); reject(e); }
-            );
-        });
-    }
-
-    function bonusLoadModel() {
-        if (BONUS.loading || BONUS.active) return;
-        const inst = geofs.aircraft.instance;
-        if (!inst || typeof inst.change !== 'function' || !bonusRegister(BONUS.base)) {
-            toast('GeoFS pas encore prêt', '#ffce54');
-            return;
-        }
-        const savedId = String(inst.id);
-        const savedPath = inst.fullPath;
-        BONUS.loading = true;
-        BONUS.error = '';
-        BONUS.status = 'téléchargement de la définition…';
-        updateHUD();
-        toast('Chargement du MiG-31 LEGO…', '#8ef6ff');
-
-        // GeoFS met le jeu en pause pendant le chargement et n'affiche rien :
-        // sur une petite connexion l'écran reste figé, on croit que ça ne
-        // charge pas. On télécharge donc la définition nous-mêmes (13 Ko),
-        // source par source, avant de laisser GeoFS construire l'avion.
-        const tick = s => {
-            if (s >= 8) {                 // au-delà de 8 s, on explique l'attente
-                BONUS.status = 'maillage en construction… ' + s + ' s';
-                updateHUD();
-            }
-        };
-        const tried = [];
-        const t0 = performance.now();
-        // Une source n'est essayée que si sa définition arrive vraiment : un
-        // hôte bloqué échoue en quelques secondes au lieu de laisser le jeu
-        // charger l'avion par défaut puis afficher « définition refusée ».
-        const attempt = i => {
-            if (i >= BONUS.mirrors.length || performance.now() - t0 > 25000) {
-                return Promise.reject(new Error('aucune source joignable'));
-            }
-            const m = BONUS.mirrors[i];
-            if (i > 0) {
-                BONUS.status = 'source ' + m.name + '…';
-                updateHUD();
-            }
-            return bonusWithin(bonusFetchDefinition(m.base), 12000, m.name)
-                .then(text => {
-                    BONUS.status = 'téléchargement du maillage et construction…';
-                    updateHUD();
-                    // Même appel que le menu « Aircraft » : GeoFS construit les
-                    // pièces et place l'avion ; seule la définition vient de nous.
-                    const release = bonusAjaxProvide(text, m.base);
-                    return bonusTryLoad(inst, m.base, tick).then(res => {
-                        if (release) release();
-                        if (res.ok) return m;
-                        // Même définition sur toutes les sources : inutile de
-                        // recommencer ailleurs.
-                        throw new Error(res.def ? 'maillage non affiché' : 'définition refusée par GeoFS');
-                    }, e => { if (release) release(); throw e; });
-                })
-                .catch(e => {
-                    const msg = (e && e.message) || String(e);
-                    if (/maillage non affiché|par GeoFS/.test(msg)) throw e;
-                    tried.push(m.name + ' : ' + msg);
-                    log('définition — ' + m.name + ' : ' + msg);
-                    return attempt(i + 1);
-                });
-        };
-        attempt(0)
-            .then(got => {
-                BONUS.loading = false;
-                BONUS.status = '';
-                BONUS.error = '';
-                BONUS.saved = { id: savedId, fullPath: savedPath };
-                // load() ne met fullPath à jour que pour les avions distants ;
-                // certains accessoires (livrée, cockpit) le lisent encore.
-                inst.fullPath = got.base;
-                bonusKeepSavedId(savedId);
-                BONUS.active = true;
-                try { localStorage.setItem(BONUS_SEEN, '1'); } catch (e) { }
-                bonusExteriorView();
-                bonusFlightCheck();
-                updateHUD();
-                toast('MiG-31 LEGO — avion complet chargé' + (got.name === 'jsDelivr' ? '' : ' (secours ' + got.name + ')'), '#39ff88');
-                log('Avion bonus : ' + BONUS.name + ' via geofs.aircraftList (id ' + BONUS.id + ', source ' + got.name + ')');
-            })
-            .catch(e => {
-                BONUS.loading = false;
-                BONUS.status = '';
-                if (bonusAjaxRelease) bonusAjaxRelease();
-                const msg = (e && e.message) || String(e);
-                BONUS.error = 'échec : ' + (tried.length ? tried.join(' · ') : msg);
-                updateHUD();
-                warn('avion bonus', e);
-                const shout = msg === 'aucune source joignable'
-                    ? 'sources injoignables (réseau filtré ?)'
-                    : msg;
-                // Ne jamais laisser un avion invisible : on remet celui d'avant.
-                try { geofs.doPause(0); } catch (e0) { }
-                try { if (String(inst.id) === String(BONUS.id)) inst.change(savedId, undefined, true); } catch (e2) { }
-                toast('MiG-31 non chargé — ' + shout, '#ff5a3c');
-                // Diagnostic : le fichier est-il joignable sur les deux sources ?
-                Promise.all([
-                    bonusProbe(BONUS.base + 'mig31-lego.glb'),
-                    bonusProbe(BONUS.mirror + 'mig31-lego.glb')
-                ]).then(r => {
-                    BONUS.error = 'CDN : ' + r[0] + ' · GitHub : ' + r[1];
-                    updateHUD();
-                    log('maillage — jsDelivr : ' + r[0] + ' · GitHub : ' + r[1]);
-                });
-            });
-    }
-
-    /* ========================= CONTRÔLE PHYSIQUE ========================= */
-    // Un avion « collé au sol » vient presque toujours de la définition, pas du
-    // modèle : portance d'aile négative (incidence à l'envers) ou profondeur
-    // inversée (tirer le manche fait pousser le nez). On surveille les deux
-    // pendant les 45 premières secondes et on le dit clairement au lieu de
-    // laisser chercher.
-    const CHECK = { timer: 0, says: {}, pitchAngle: null, pullSince: 0 };
-
-    function checkSay(key, text, bad) {
-        if (CHECK.says[key]) return;
-        CHECK.says[key] = text;
-        log('contrôle physique — ' + text);
-        if (bad) toast(text, '#ffb02e');
-    }
-
-    function checkStop() {
-        if (CHECK.timer) clearInterval(CHECK.timer);
-        CHECK.timer = 0;
-    }
-
-    function bonusFlightCheck() {
-        checkStop();
-        CHECK.says = {};
-        CHECK.pitchAngle = null;
-        CHECK.pullSince = 0;
-        const t0 = Date.now();
-        CHECK.timer = setInterval(() => {
-            const v = (geofs.animation && geofs.animation.values) || {};
-            const kias = v.kias || 0;
-            const wing = (v.leftWingLift || 0) + (v.rightWingLift || 0);
-            const elev = v.elevatorLift || 0;
-            const pitch = v.pitch || 0;
-            if (kias > 40) {
-                if (wing < -500) {
-                    checkSay('wing', 'ailes : portance NÉGATIVE (' + Math.round(wing) + ' N à '
-                        + Math.round(kias) + ' kt) — incidence à l\'envers', true);
-                } else if (wing > 2000) {
-                    checkSay('wing', 'ailes : portance correcte (+' + Math.round(wing)
-                        + ' N à ' + Math.round(kias) + ' kt)', false);
-                }
-            }
-            // À basse vitesse la profondeur ne produit que du bruit : on ne
-            // juge son sens qu'une fois l'avion lancé.
-            // La profondeur ne se juge pas sur l'effort mesuré mais sur ce que
-            // fait vraiment l'avion : on tire le manche et on regarde si
-            // l'assiette monte. Au sol l'assiette ne bouge pas, donc pas de
-            // verdict (et pas de fausse alerte) avant le décollage.
-            const ac = geofs.aircraft.instance;
-            const ang = (ac && ac.htr && typeof ac.htr[1] === 'number') ? ac.htr[1] : null;
-            if (kias > 60 && ang !== null) {
-                if (pitch < -0.5) {
-                    if (!CHECK.pullSince) { CHECK.pullSince = Date.now(); CHECK.pitchAngle = ang; }
-                    else if (Date.now() - CHECK.pullSince > 900 && Math.abs(ang - CHECK.pitchAngle) > 0.6) {
-                        const noseUp = ang > CHECK.pitchAngle;
-                        checkSay('elev', noseUp
-                            ? 'profondeur dans le bon sens (manche tiré → nez qui monte)'
-                            : 'profondeur INVERSÉE (manche tiré → nez qui descend)', !noseUp);
-                    }
-                } else {
-                    CHECK.pullSince = 0;
-                }
-            }
-            if (Date.now() - t0 > 45000 || (CHECK.says.wing && CHECK.says.elev)) checkStop();
-        }, 500);
-    }
-
-    function bonusRestore() {
-        checkStop();
-        if (!BONUS.active || !BONUS.saved) return;
-        const inst = geofs.aircraft.instance;
-        if (!inst || typeof inst.change !== 'function') return;
-        const saved = BONUS.saved;
-        BONUS.loading = true;
-        updateHUD();
-        Promise.resolve(inst.change(saved.id, undefined, true)).then(() => {
-            inst.fullPath = saved.fullPath;
-            BONUS.active = false;
-            BONUS.loading = false;
-            bonusExteriorView();
-            updateHUD();
-            toast('Avion GeoFS d\'origine', '#39ff88');
-        }).catch(e => {
-            BONUS.loading = false;
-            updateHUD();
-            warn('retour avion', e);
-            toast('Impossible de restaurer l\'avion', '#ff5a3c');
-        });
-    }
-
-    function toggleBonus() {
-        if (BONUS.active) bonusRestore();
-        else bonusLoadModel();
     }
 
     /* ===================== INTERFACE DÉDIÉE (PANNEAU) ================== */
@@ -2353,18 +1956,6 @@
         h.push('<div class="row"><span>Contacts</span><span class="v">' + S.contacts.length + '</span></div>');
 
         h.push('<div class="sep"></div>');
-        h.push('<h4>MODÈLE DE L\'AVION</h4>');
-        h.push('<div class="row"><span>Modèle</span><span class="choix">' +
-            '<button class="gmm-btn' + (BONUS.active ? '' : ' actif') + '" data-act="modele-geofs">GeoFS</button>' +
-            '<button class="gmm-btn' + (BONUS.active ? ' actif' : '') + '" data-act="modele-lego">MiG-31 LEGO</button>' +
-            '</span></div>');
-        h.push('<div class="row"><span class="dim">' +
-            (BONUS.loading ? (BONUS.status || 'chargement…')
-                : (BONUS.error ? '<span style="color:#ff5a3c">' + BONUS.error + '</span>'
-                    : (BONUS.active ? 'avion complet · physique et train dédiés'
-                        : 'avion d\'origine'))) + '</span></div>');
-
-        h.push('<div class="sep"></div>');
         h.push('<div class="dim">' + keyLabel(CFG.keys.arm) + ' armer · ' + keyLabel(CFG.keys.fire) + ' tirer · ' +
             keyLabel(CFG.keys.type) + ' type · ' + keyLabel(CFG.keys.bomb[0]) + ' bombe · ' +
             keyLabel(CFG.keys.reload) + ' réarmer</div>');
@@ -2397,10 +1988,17 @@
         if (!S.profile) return;
         S.loadout = S.profile.missiles || 0;
         S.bombs = S.profile.bombs || 0;
-        S.stations.concat(S.bombStations).forEach(s => {
-            s.used = false;
-            (s.parts || []).forEach(e => { try { e.show = true; } catch (err) { } });
-        });
+        // Les emports vides ont été retirés du rendu : il faut les reconstruire.
+        // Sinon il suffit de remettre visibles ceux qui restent.
+        const all = S.stations.concat(S.bombStations);
+        if (all.some(s => !s.parts || !s.parts.length)) {
+            buildStations(S.profile);
+        } else {
+            all.forEach(s => {
+                s.used = false;
+                (s.parts || []).forEach(e => { try { e.show = true; } catch (err) { } });
+            });
+        }
         toast('Réarmement complet — ' + S.loadout + ' missiles, ' + S.bombs + ' bombes', '#8ef6ff');
         updateHUD();
     }
@@ -2478,7 +2076,6 @@
             else if (matchAny(e, CFG.keys.target)) action = cycleTarget;
             else if (matchAny(e, CFG.keys.reload)) action = reload;
             else if (matchAny(e, CFG.keys.calibrate)) action = toggleCalibration;
-            else if (matchAny(e, CFG.keys.bonus)) action = toggleBonus;
             if (!action) return;
 
             e.preventDefault();
@@ -2493,8 +2090,7 @@
         if (S.ready) return;
         S.ready = true;
         S.cal = loadCal();
-        bonusCleanStaleId();
-        bonusWarmCache();
+        cleanStaleAircraftId();
         buildUI();
         installKeys();
         // La barre du bas de GeoFS arrive parfois après le script : on réessaie.
