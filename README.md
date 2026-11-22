@@ -245,32 +245,52 @@ C'est une mesure de **commandes soumises**, pas d'appels OpenGL : elle inclut le
 éliminées par le frustum. Elle ne varie donc qu'avec le contenu de la scène, pas avec
 l'orientation de la caméra, ce qui est exactement ce qu'il faut pour comparer deux états.
 
-### Protocole de mesure
+### Protocole de mesure (Rafale)
 
-1. Prendre un **B-52** (`b-52`), rester au sol, à l'arrêt, caméra extérieure fixe. Ne plus
+Le Rafale (`rafale`) porte **6 missiles + 4 bombes** : 86 pièces cuites en 10 `Primitive`. Il
+suffit à voir l'effet anti-lag, et son chargement est plus rapide que les 20 bombes du B-52.
+
+1. Prendre un **Rafale** (`rafale`), rester au sol, à l'arrêt, caméra extérieure fixe. Ne plus
    bouger la souris : la vue et le lieu doivent rester identiques d'un relevé à l'autre.
 2. Ouvrir le panneau **Armement**, attendre « Emports disponibles », activer `FPS · dessin`.
 3. Laisser tourner **15 s**, puis noter les trois valeurs : i/s, min, commandes. C'est l'état
-   **chargé** (20 bombes, 20 primitives).
-4. Larguer les 20 bombes (touche bombe, une par appui) et attendre que la dernière ait disparu
-   (impact ou sortie de scène). Laisser tourner **15 s** : c'est l'état **vide**.
-5. Noter à nouveau i/s, min, commandes, puis réarmer et refaire un relevé chargé pour vérifier
-   la reproductibilité.
+   **chargé** (10 emports, 10 primitives).
+4. Tirer les 6 missiles (`Q`) et larguer les 4 bombes (touche bombe, une par appui), attendre
+   que la dernière ait disparu (impact ou sortie de scène). Laisser tourner **15 s** : c'est
+   l'état **vide**.
+5. Noter à nouveau i/s, min, commandes, puis réarmer (`D`) et refaire un relevé chargé pour
+   vérifier la reproductibilité.
+
+### Temps de chargement
+
+Le chargement se fait quand l'avion est détecté : les 86 pièces sont cuites en 10 `Primitive`.
+Pour le chronométrer sur le Rafale :
+
+1. activer `FPS · dessin` **avant** de choisir l'avion ;
+2. lancer le vol et chronométrer jusqu'à ce que les emports soient visibles sous les ailes ;
+3. relever le **min** : c'est l'à-coup de la première image qui cuit les géométries (la valeur
+   `commandes`, elle, ne bouge pas : 0 puis 10).
+
+Le placement attend parfois le maillage de l'aile (un essai toutes les 500 ms, six au maximum,
+soit 3 s) : c'est ce délai qui domine, pas la cuisson des géométries.
 
 ### Valeurs attendues
 
 | Mesure | Attendu | Si ce n'est pas le cas |
 | --- | --- | --- |
-| commandes chargé − vide | **20 ± 2** | une bombe = 8 pièces cuites dans **un** `Primitive` = **une** commande. Un écart d'environ 160 signifie que les pièces sont redevenues des entités dynamiques (régression du rendu). |
-| commandes avec un missile en vol | **+1 par missile** | 9 ou 13 pièces selon les canards, toujours une seule commande. |
+| commandes chargé − vide | **10 ± 2** | une munition = 8 ou 9 pièces cuites dans **un** `Primitive` = **une** commande. Un écart d'environ 86 signifie que les pièces sont redevenues des entités dynamiques (régression du rendu). |
+| commandes avec un missile en vol | **+1 par missile** | 9 pièces pour l'AIM-120, 13 pour les types à canards, toujours une seule commande. |
 | i/s chargé vs vide | écart dans le bruit (≈ 0–2 i/s) | les géométries sont cuites une fois ; à chaque image seule la matrice modèle de la munition change, sans recréation de primitive. |
-| min chargé | ≥ min vide − 2 | l'ancien rendu s'effondrait à l'arrêt avec 20 bombes ; ce n'est plus le cas. |
+| min chargé | ≥ min vide − 2 | l'ancien rendu s'effondrait à l'arrêt avec le chargement complet ; ce n'est plus le cas. |
 | affichage `—` | aucun | `—` = aucune image rendue depuis l'activation (vol en pause / menu). Reprendre le vol : le compteur ne s'actualise que quand Cesium rend une image. |
+
+Pour la charge maximale, le **B-52** (20 bombes, 160 pièces) sert de référence : l'écart
+chargé/vide doit y être de **20 ± 2**, pas de 160.
 
 L'anti-lag ne se lit pas dans un FPS absolu, qui dépend de la machine, du lieu et du terrain :
 compter sur l'**écart chargé/vide** et la **stabilité du minimum**. Un écart supérieur à 2
-commandes par bombe, ou un minimum qui chute de plus de 5 i/s entre chargé et vide, signale un
-retour du chemin dynamique — vérifier la console (`F12`).
+commandes par munition, ou un minimum qui chute de plus de 5 i/s entre chargé et vide, signale
+un retour du chemin dynamique — vérifier la console (`F12`).
 
 ## Source, parties et génération
 
