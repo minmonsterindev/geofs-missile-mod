@@ -443,8 +443,11 @@
      }
     ],
     "suspension": {
+     "motion": "translate",
+     "axis": "Z",
+     "ratio": 1,
      "stiffness": 80,
-     "damping": 2
+     "damping": 5
     },
     "rotation": [
      0,
@@ -487,8 +490,11 @@
      }
     ],
     "suspension": {
+     "motion": "translate",
+     "axis": "Z",
+     "ratio": 1,
      "stiffness": 80,
-     "damping": 2
+     "damping": 5
     },
     "rotation": [
      0,
@@ -531,8 +537,11 @@
      }
     ],
     "suspension": {
+     "motion": "translate",
+     "axis": "Z",
+     "ratio": 1,
      "stiffness": 120,
-     "damping": 2
+     "damping": 5
     },
     "rotation": [
      0,
@@ -548,7 +557,7 @@
    {
     "name": "rightEngine",
     "type": "engine",
-    "thrust": 152000,
+    "thrust": 112000,
     "forceDirection": "Y",
     "points": {
      "forceSourcePoint": [
@@ -561,7 +570,7 @@
    {
     "name": "leftEngine",
     "type": "engine",
-    "thrust": 152000,
+    "thrust": 112000,
     "forceDirection": "Y",
     "points": {
      "forceSourcePoint": [
@@ -577,6 +586,7 @@
     "frictionCoef": 2,
     "dynamicFriction": 0.01,
     "rollingFriction": 1e-05,
+    "lockSpeed": 0.008,
     "damping": 1
    },
    "frame": {
@@ -610,4 +620,4 @@
    }
   }
  }
- ]
+]
