@@ -42,6 +42,7 @@
             updateFx(dt);
             updateLock();
             if (now - S.hudAt > 500) { S.hudAt = now; updateHUD(); }
+            updatePerf(now);
         } catch (e) {
             warn('tick', e);
         }
@@ -116,6 +117,9 @@
             h.push('<div class="row"><span>Bombes</span><span class="v">' + S.bombs + ' / ' + S.profile.bombs + '</span></div>');
         }
         h.push('<div class="row"><span>Contacts</span><span class="v">' + S.contacts.length + '</span></div>');
+        h.push('<div class="row"><span>Compteur</span>' +
+            '<button class="gmm-btn small' + (S.perfOn ? ' actif' : '') + '" data-act="perf" ' +
+            'title="Images par seconde et appels de dessin par image">FPS · dessin</button></div>');
 
         h.push('<div class="sep"></div>');
         h.push('<div class="dim">' + keyLabel(CFG.keys.arm) + ' armer · ' + keyLabel(CFG.keys.fire) + ' tirer · ' +
@@ -125,6 +129,56 @@
         if (txt !== HUD.panelSig) {
             HUD.panelSig = txt;
             S.ui.panel.innerHTML = txt;
+        }
+    }
+
+    /* ====================== COMPTEUR FPS / APPELS DE DESSIN ============ */
+
+    // Appels de dessin de la dernière image rendue : Cesium remplit
+    // `frameState.commandList` pendant le rendu, on lit donc le total de
+    // l'image précédente. C'est le chiffre qui doit baisser avec le rendu par
+    // Primitive : une munition = un appel, au lieu d'une entité par pièce.
+    function drawCalls() {
+        try {
+            const scene = viewer().scene;
+            const fs = scene && scene.frameState;
+            if (fs && fs.commandList) return fs.commandList.length;
+        } catch (e) { }
+        return -1;
+    }
+
+    // Mesure par fenêtres de 500 ms : un FPS image par image saute trop pour
+    // comparer deux réglages, et le minimum retenu montre les à-coups.
+    const PERF = { frames: 0, since: 0, min: 0, draws: -1 };
+
+    function togglePerf() {
+        S.perfOn = !S.perfOn;
+        PERF.frames = 0;
+        PERF.since = 0;
+        PERF.min = 0;
+        PERF.draws = -1;
+        if (S.ui && S.ui.perf) {
+            S.ui.perf.classList.toggle('on', !!S.perfOn);
+            S.ui.perf.textContent = S.perfOn ? 'mesure en cours…' : '';
+        }
+        if (S.perfOn) toast('Compteur FPS · appels de dessin affiché', '#8ef6ff');
+    }
+
+    function updatePerf(now) {
+        if (!S.perfOn) return;
+        PERF.frames++;
+        if (!PERF.since) { PERF.since = now; return; }
+        const span = now - PERF.since;
+        if (span < 500) return;
+        const fps = Math.round(PERF.frames * 1000 / span);
+        PERF.min = PERF.min ? Math.min(PERF.min, fps) : fps;
+        PERF.draws = drawCalls();
+        PERF.frames = 0;
+        PERF.since = now;
+        if (S.ui && S.ui.perf) {
+            S.ui.perf.innerHTML = '<b>' + fps + '</b> i/s' +
+                ' <span class="dim">min ' + PERF.min + '</span>' +
+                ' · <b>' + (PERF.draws >= 0 ? PERF.draws : '—') + '</b> appels de dessin';
         }
     }
 
